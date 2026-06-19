@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import { useProgramStore } from '@/store/programStore';
@@ -84,36 +84,89 @@ export default function SikaPemeriksaanPage() {
 
   const [showModal, setShowModal] = useState(false);
 
+  // Daftar sertifikat dengan mapping ke halaman
   const sertifikatCol1 = [
-    'Sertifikat Kerja Panas (SKP)', 'Sertifikat Kerja Dingin (SKD)',
-    'Sertifikat Kerja Ruang Terbatas (SKRT)', 'Sertifikat Kerja Radiografi (SKR)',
+    'Sertifikat Kerja Panas (SKP)',
+    'Sertifikat Kerja Dingin (SKD)',
+    'Sertifikat Kerja Ruang Terbatas (SKRT)',
+    'Sertifikat Kerja Radiografi (SKR)',
     'Sertifikat Kerja Isolasi Listrik (SKL)',
   ];
   const sertifikatCol2 = [
-    'Sertifikat Kerja Penggalian (SKG)', 'Sertifikat Kerja Pengangkatan (SKA)',
-    'Sertifikat Kerja Di Ketinggian (SKK)', 'Sertifikat Kerja Pengambilan Fotografi (SKPF)',
+    'Sertifikat Kerja Penggalian (SKG)',
+    'Sertifikat Kerja Pengangkatan (SKA)',
+    'Sertifikat Kerja Di Ketinggian (SKK)',
+    'Sertifikat Kerja Pengambilan Fotografi (SKPF)',
   ];
+
+  const allSertifikat = [...sertifikatCol1, ...sertifikatCol2];
 
   const [sertifikat, setSertifikat] = useState<string[]>([]);
   const [sifatPekerjaan, setSifatPekerjaan] = useState('');
   const sifatOptions = ['Normal', 'Proyek', 'T/A', 'Emergency'];
 
+  // Saat komponen mount, inisialisasi sertifikat dari filledSertifikat
+  useEffect(() => {
+    // Sertifikat yang sudah terisi di store otomatis akan tercentang
+    // Sertifikat yang belum terisi tapi sudah dipilih sebelumnya akan tetap di state
+    const initialSertifikat = allSertifikat.filter(item => filledSertifikat.includes(item));
+    setSertifikat(prev => {
+      // Gabungkan yang sudah terisi dengan yang sudah dipilih sebelumnya
+      const combined = [...new Set([...prev, ...initialSertifikat])];
+      return combined;
+    });
+  }, [filledSertifikat]);
+
+  // Mapping sertifikat ke halaman
+  const sertifikatRoutes: Record<string, string> = {
+    'Sertifikat Kerja Panas (SKP)': '/dashboard/pemohon/sika/sertifikat/skp',
+    'Sertifikat Kerja Dingin (SKD)': '/dashboard/pemohon/sika/sertifikat/skd',
+    'Sertifikat Kerja Ruang Terbatas (SKRT)': '/dashboard/pemohon/sika/sertifikat/skrt',
+    'Sertifikat Kerja Radiografi (SKR)': '/dashboard/pemohon/sika/sertifikat/skr',
+    'Sertifikat Kerja Isolasi Listrik (SKL)': '/dashboard/pemohon/sika/sertifikat/skl',
+    'Sertifikat Kerja Penggalian (SKG)': '/dashboard/pemohon/sika/sertifikat/skg',
+    'Sertifikat Kerja Pengangkatan (SKA)': '/dashboard/pemohon/sika/sertifikat/ska',
+    'Sertifikat Kerja Di Ketinggian (SKK)': '/dashboard/pemohon/sika/sertifikat/skk',
+    'Sertifikat Kerja Pengambilan Fotografi (SKPF)': '/dashboard/pemohon/sika/sertifikat/skpf',
+  };
+
   const toggleSertifikat = (val: string) => {
-    if (val === 'Sertifikat Kerja Panas (SKP)') { router.push('/dashboard/pemohon/sika/sertifikat/skp'); return; }
-    if (val === 'Sertifikat Kerja Dingin (SKD)') { router.push('/dashboard/pemohon/sika/sertifikat/skd'); return; }
-    if (val === 'Sertifikat Kerja Ruang Terbatas (SKRT)') { router.push('/dashboard/pemohon/sika/sertifikat/skrt'); return; }
-    if (val === 'Sertifikat Kerja Radiografi (SKR)') { router.push('/dashboard/pemohon/sika/sertifikat/skr'); return; }
-    if (val === 'Sertifikat Kerja Isolasi Listrik (SKL)') { router.push('/dashboard/pemohon/sika/sertifikat/skl'); return; }
-    if (val === 'Sertifikat Kerja Penggalian (SKG)') { router.push('/dashboard/pemohon/sika/sertifikat/skg'); return; }
-    if (val === 'Sertifikat Kerja Pengangkatan (SKA)') { router.push('/dashboard/pemohon/sika/sertifikat/ska'); return; }
-    if (val === 'Sertifikat Kerja Di Ketinggian (SKK)') { router.push('/dashboard/pemohon/sika/sertifikat/skk'); return; }
-    if (val === 'Sertifikat Kerja Pengembalian Fotografi (SKPF)') { router.push('/dashboard/pemohon/sika/sertifikat/skpf'); return; }
-    setSertifikat((prev) => prev.includes(val) ? prev.filter((v) => v !== val) : [...prev, val]);
+    // Jika sudah terisi di store, tidak bisa di-uncheck
+    if (filledSertifikat.includes(val)) {
+      // Redirect ke halaman sertifikat jika sudah terisi
+      const route = sertifikatRoutes[val];
+      if (route) {
+        router.push(route);
+      }
+      return;
+    }
+
+    // Jika belum terisi, toggle normal
+    setSertifikat((prev) => {
+      const newList = prev.includes(val) ? prev.filter((v) => v !== val) : [...prev, val];
+      return newList;
+    });
+
+    // Redirect ke halaman sertifikat saat dicentang
+    if (!sertifikat.includes(val)) {
+      const route = sertifikatRoutes[val];
+      if (route) {
+        router.push(route);
+      }
+    }
   };
 
   const toggle = (list: string[], setList: (v: string[]) => void, val: string) => {
     if (!val) return;
     setList(list.includes(val) ? list.filter((v) => v !== val) : [...list, val]);
+  };
+
+  // Handler untuk menyimpan dan menutup modal
+  const handleSimpan = () => {
+    // Semua sertifikat yang sudah terisi tetap dipertahankan
+    // Tidak ada yang di-uncheck
+    setShowModal(false);
+    router.push('/dashboard/pemohon/data-management');
   };
 
   return (
@@ -260,7 +313,7 @@ export default function SikaPemeriksaanPage() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-                  {[...sertifikatCol1, ...sertifikatCol2].map((item) => {
+                  {allSertifikat.map((item) => {
                     const isFilled = filledSertifikat.includes(item);
                     const isChecked = sertifikat.includes(item) || isFilled;
                     return (
@@ -268,7 +321,7 @@ export default function SikaPemeriksaanPage() {
                         key={item}
                         className={`flex items-center gap-3 cursor-pointer rounded-lg px-3 py-2 transition-all border ${
                           isFilled
-                            ? 'bg-green-50 border-green-300'
+                            ? 'bg-green-50 border-green-300 cursor-default'
                             : isChecked
                             ? 'bg-blue-50 border-blue-300'
                             : 'bg-white border-gray-200 hover:border-blue-200 hover:bg-blue-50/40'
@@ -278,7 +331,8 @@ export default function SikaPemeriksaanPage() {
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => toggleSertifikat(item)}
-                          className="w-4 h-4 shrink-0 accent-blue-600 cursor-pointer"
+                          disabled={isFilled}
+                          className={`w-4 h-4 shrink-0 ${isFilled ? 'accent-green-600' : 'accent-blue-600'} cursor-pointer`}
                         />
                         <span className={`text-xs font-medium leading-tight ${isFilled ? 'text-green-700' : isChecked ? 'text-blue-700' : 'text-gray-600'}`}>
                           {item}
@@ -324,7 +378,7 @@ export default function SikaPemeriksaanPage() {
                 Batal
               </button>
               <button
-                onClick={() => router.push('/dashboard/pemohon/data-management')}
+                onClick={handleSimpan}
                 className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition shadow-md shadow-blue-200"
               >
                 Simpan
