@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
+import { useProgramStore } from '@/store/programStore';
 
 const CheckItem = ({
   label, checked, onChange,
@@ -20,6 +21,7 @@ const CheckItem = ({
 
 export default function SikaPemeriksaanPage() {
   const router = useRouter();
+  const { filledSertifikat, markSertifikatFilled, unmarkSertifikat } = useProgramStore();
 
   const isolasiCol1 = ['Electrical Circuits', 'Gas Valve', 'Water Valves'];
   const isolasiCol2 = ['Air Instrument Valves', 'Mekanik', 'Pneumatic/Hydraulic'];
@@ -81,6 +83,7 @@ export default function SikaPemeriksaanPage() {
   const [permintaanTambahan, setPermintaanTambahan] = useState('');
 
   const [showModal, setShowModal] = useState(false);
+
   const sertifikatCol1 = [
     'Sertifikat Kerja Panas (SKP)', 'Sertifikat Kerja Dingin (SKD)',
     'Sertifikat Kerja Ruang Terbatas (SKRT)', 'Sertifikat Kerja Radiografi (SKR)',
@@ -88,15 +91,25 @@ export default function SikaPemeriksaanPage() {
   ];
   const sertifikatCol2 = [
     'Sertifikat Kerja Penggalian (SKG)', 'Sertifikat Kerja Pengangkatan (SKA)',
-    'Sertifikat Kerja Pemasangan Perancah (SKPP)', 'Sertifikat Kerja Pengembalian Fotografi (SKPF)',
+    'Sertifikat Kerja Di Ketinggian (SKK)', 'Sertifikat Kerja Pengambilan Fotografi (SKPF)',
   ];
+
   const [sertifikat, setSertifikat] = useState<string[]>([]);
-  const [sertifikatFiles, setSertifikatFiles] = useState<File[]>([]);
   const [sifatPekerjaan, setSifatPekerjaan] = useState('');
   const sifatOptions = ['Normal', 'Proyek', 'T/A', 'Emergency'];
 
-  const toggleSertifikat = (val: string) =>
+  const toggleSertifikat = (val: string) => {
+    if (val === 'Sertifikat Kerja Panas (SKP)') { router.push('/dashboard/pemohon/sika/sertifikat/skp'); return; }
+    if (val === 'Sertifikat Kerja Dingin (SKD)') { router.push('/dashboard/pemohon/sika/sertifikat/skd'); return; }
+    if (val === 'Sertifikat Kerja Ruang Terbatas (SKRT)') { router.push('/dashboard/pemohon/sika/sertifikat/skrt'); return; }
+    if (val === 'Sertifikat Kerja Radiografi (SKR)') { router.push('/dashboard/pemohon/sika/sertifikat/skr'); return; }
+    if (val === 'Sertifikat Kerja Isolasi Listrik (SKL)') { router.push('/dashboard/pemohon/sika/sertifikat/skl'); return; }
+    if (val === 'Sertifikat Kerja Penggalian (SKG)') { router.push('/dashboard/pemohon/sika/sertifikat/skg'); return; }
+    if (val === 'Sertifikat Kerja Pengangkatan (SKA)') { router.push('/dashboard/pemohon/sika/sertifikat/ska'); return; }
+    if (val === 'Sertifikat Kerja Di Ketinggian (SKK)') { router.push('/dashboard/pemohon/sika/sertifikat/skk'); return; }
+    if (val === 'Sertifikat Kerja Pengembalian Fotografi (SKPF)') { router.push('/dashboard/pemohon/sika/sertifikat/skpf'); return; }
     setSertifikat((prev) => prev.includes(val) ? prev.filter((v) => v !== val) : [...prev, val]);
+  };
 
   const toggle = (list: string[], setList: (v: string[]) => void, val: string) => {
     if (!val) return;
@@ -216,7 +229,6 @@ export default function SikaPemeriksaanPage() {
           >
             Back
           </button>
-
           <button
             onClick={() => setShowModal(true)}
             className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition shadow-md shadow-blue-200"
@@ -246,63 +258,39 @@ export default function SikaPemeriksaanPage() {
                   <div className="w-1 h-5 bg-blue-500 rounded-full" />
                   <p className="text-sm font-bold text-gray-800">Sertifikat Kerja yang Diperlukan</p>
                 </div>
+
                 <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-                  {[...sertifikatCol1, ...sertifikatCol2].map((item) => (
-                    <label key={item} className={`flex items-center gap-3 cursor-pointer rounded-lg px-3 py-2 transition-all border ${sertifikat.includes(item) ? 'bg-blue-50 border-blue-300' : 'bg-white border-gray-200 hover:border-blue-200 hover:bg-blue-50/40'}`}>
-                      <input type="checkbox" checked={sertifikat.includes(item)} onChange={() => toggleSertifikat(item)} className="w-4 h-4 shrink-0 accent-blue-600 cursor-pointer" />
-                      <span className={`text-xs font-medium leading-tight ${sertifikat.includes(item) ? 'text-blue-700' : 'text-gray-600'}`}>{item}</span>
-                    </label>
-                  ))}
-                </div>
-
-                <div className="mt-8">
-                  <label className="flex flex-col items-center justify-center w-full border-2 border-dashed border-blue-300 rounded-xl py-5 px-4 cursor-pointer bg-white hover:bg-blue-50/40 transition-all group"
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const dropped = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
-                      const valid = dropped.filter(f => f.size <= 10 * 1024 * 1024);
-                      setSertifikatFiles(prev => [...prev, ...valid].slice(0, 20));
-                    }}>
-                    <input type="file" accept=".pdf" multiple className="hidden"
-                      onChange={(e) => {
-                        const picked = Array.from(e.target.files || []).filter(f => f.size <= 10 * 1024 * 1024);
-                        setSertifikatFiles(prev => [...prev, ...picked].slice(0, 20));
-                        e.target.value = '';
-                      }} />
-                    <div className="w-10 h-10 bg-blue-100 group-hover:bg-blue-200 rounded-full flex items-center justify-center mb-2 transition">
-                      <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                      </svg>
-                    </div>
-                    <p className="text-xs font-semibold text-blue-600 group-hover:text-blue-700">Klik atau seret file PDF ke sini</p>
-                    <p className="text-xs text-gray-400 mt-0.5">Format PDF • Maks. 10 MB per file</p>
-                  </label>
-
-                  {sertifikatFiles.length > 0 && (
-                    <div className="mt-3 space-y-2">
-                      {sertifikatFiles.map((file, idx) => (
-                        <div key={idx} className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 bg-red-100 rounded flex items-center justify-center shrink-0">
-                              <span className="text-red-500 text-[9px] font-bold">PDF</span>
-                            </div>
-                            <div>
-                              <p className="text-xs font-medium text-gray-700 truncate max-w-[340px]">{file.name}</p>
-                              <p className="text-[10px] text-gray-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                            </div>
-                          </div>
-                          <button onClick={() => setSertifikatFiles(prev => prev.filter((_, i) => i !== idx))}
-                            className="w-6 h-6 hover:bg-red-50 rounded-full flex items-center justify-center transition">
-                            <X size={12} className="text-gray-400 hover:text-red-400" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <p style={{ fontSize: '10px' }} className="text-gray-400 mt-2 leading-relaxed">
-                    *Wajib sudah diverifikasi oleh kedua belah pihak sebelum diunggah. File yang diunggah harus dalam format PDF dan tidak melebihi 10 MB per file.
-                  </p>
+                  {[...sertifikatCol1, ...sertifikatCol2].map((item) => {
+                    const isFilled = filledSertifikat.includes(item);
+                    const isChecked = sertifikat.includes(item) || isFilled;
+                    return (
+                      <label
+                        key={item}
+                        className={`flex items-center gap-3 cursor-pointer rounded-lg px-3 py-2 transition-all border ${
+                          isFilled
+                            ? 'bg-green-50 border-green-300'
+                            : isChecked
+                            ? 'bg-blue-50 border-blue-300'
+                            : 'bg-white border-gray-200 hover:border-blue-200 hover:bg-blue-50/40'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleSertifikat(item)}
+                          className="w-4 h-4 shrink-0 accent-blue-600 cursor-pointer"
+                        />
+                        <span className={`text-xs font-medium leading-tight ${isFilled ? 'text-green-700' : isChecked ? 'text-blue-700' : 'text-gray-600'}`}>
+                          {item}
+                        </span>
+                        {isFilled && (
+                          <span className="ml-auto text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold shrink-0">
+                            ✓ Terisi
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -328,15 +316,17 @@ export default function SikaPemeriksaanPage() {
               </div>
             </div>
 
-           <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
-            <button
-              onClick={() => setShowModal(false)}
-              className="px-6 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition shadow-md shadow-red-200"
-            >
-              Batal
-            </button>
-              <button onClick={() => router.push('/dashboard/pemohon/data-management')}
-                className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition shadow-md shadow-blue-200">
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+              <button
+                onClick={() => setShowModal(false)}
+                className="px-6 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition shadow-md shadow-red-200"
+              >
+                Batal
+              </button>
+              <button
+                onClick={() => router.push('/dashboard/pemohon/data-management')}
+                className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition shadow-md shadow-blue-200"
+              >
                 Simpan
               </button>
             </div>

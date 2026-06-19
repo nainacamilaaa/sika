@@ -2,12 +2,12 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { Menu, Plus, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { useProgramStore } from '@/store/programStore';
 
 export default function SikaNewPage() {
   const router = useRouter();
-  const { program, jsa } = useProgramStore();
+  const { program, setSika } = useProgramStore();
 
   const [form, setForm] = useState({
     fungsiPerusahaan: program?.pelaksanaPerusahaan || '',
@@ -36,11 +36,24 @@ export default function SikaNewPage() {
     setPekerjaList((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const saveToStore = () => {
+    setSika({
+      fungsiPerusahaan: form.fungsiPerusahaan,
+      lokasiInstalasi: form.lokasiInstalasi,
+      peralatanNoIdentitas: form.peralatanNoIdentitas,
+      uraianPekerjaan: form.uraianPekerjaan,
+      peralatanDigunakan: form.peralatanDigunakan,
+      pekerjaList: pekerjaList.filter((p) => p.trim() !== ''),
+    });
+  };
+
   const handleSaveClose = () => {
+    saveToStore();
     router.push('/dashboard/pemohon/data-management');
   };
 
   const handleNext = () => {
+    saveToStore();
     router.push('/dashboard/pemohon/sika/pemeriksaan');
   };
 
@@ -51,11 +64,7 @@ export default function SikaNewPage() {
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3" style={{ paddingLeft: '30px' }}>
           <div className="flex items-center gap-2">
-            <img
-              src="/logosika.svg"
-              alt="SIKA"
-              className="h-7 object-contain"
-            />
+            <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
             <span className="font-bold text-gray-800 text-sm tracking-wide">ENTRY DATA</span>
           </div>
         </div>
@@ -90,11 +99,8 @@ export default function SikaNewPage() {
           {/* Form */}
           <div className="px-8 py-6 space-y-5">
 
-            {/* Fungsi / Perusahaan */}
             <div className="flex items-center gap-4">
-             <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
-                Fungsi / Perusahaan
-              </label>
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">Fungsi / Perusahaan</label>
               <span className="text-gray-400 shrink-0">:</span>
               <input
                 type="text"
@@ -104,11 +110,8 @@ export default function SikaNewPage() {
               />
             </div>
 
-            {/* Lokasi / Instalasi */}
             <div className="flex items-center gap-4">
-            <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
-                Lokasi / Instalasi
-              </label>
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">Lokasi / Instalasi</label>
               <span className="text-gray-400 shrink-0">:</span>
               <input
                 type="text"
@@ -118,11 +121,8 @@ export default function SikaNewPage() {
               />
             </div>
 
-            {/* Peralatan / No. Identitas */}
             <div className="flex items-center gap-4">
-              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
-                Peralatan / No. Identitas
-              </label>
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">Peralatan / No. Identitas</label>
               <span className="text-gray-400 shrink-0">:</span>
               <input
                 type="text"
@@ -132,11 +132,8 @@ export default function SikaNewPage() {
               />
             </div>
 
-            {/* Uraian Pekerjaan */}
             <div className="flex items-start gap-4">
-              <label className="w-64 text-sm text-gray-700 shrink-0 pt-2 font-medium">
-                Uraian Pekerjaan
-              </label>
+              <label className="w-64 text-sm text-gray-700 shrink-0 pt-2 font-medium">Uraian Pekerjaan</label>
               <span className="text-gray-400 shrink-0 pt-2">:</span>
               <textarea
                 value={form.uraianPekerjaan}
@@ -146,11 +143,8 @@ export default function SikaNewPage() {
               />
             </div>
 
-            {/* Peralatan yang Digunakan */}
             <div className="flex items-start gap-4">
-              <label className="w-64 text-sm text-gray-700 shrink-0 pt-2 font-medium">
-                Peralatan yang Digunakan
-              </label>
+              <label className="w-64 text-sm text-gray-700 shrink-0 pt-2 font-medium">Peralatan yang Digunakan</label>
               <span className="text-gray-400 shrink-0 pt-2">:</span>
               <textarea
                 value={form.peralatanDigunakan}
@@ -160,11 +154,8 @@ export default function SikaNewPage() {
               />
             </div>
 
-            {/* Jumlah Pekerja */}
             <div className="flex items-start gap-4">
-              <label className="w-64 text-sm text-gray-700 shrink-0 pt-2 font-medium">
-                Jumlah Pekerja
-              </label>
+              <label className="w-64 text-sm text-gray-700 shrink-0 pt-2 font-medium">Jumlah Pekerja</label>
               <span className="text-gray-400 shrink-0 pt-2">:</span>
               <div className="flex-1 space-y-2">
                 {pekerjaList.map((pekerja, index) => (
@@ -180,18 +171,12 @@ export default function SikaNewPage() {
                       className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400"
                     />
                     {pekerjaList.length > 1 && (
-                      <button
-                        onClick={() => handleRemovePekerja(index)}
-                        className="text-red-400 hover:text-red-600 transition shrink-0"
-                      >
+                      <button onClick={() => handleRemovePekerja(index)} className="text-red-400 hover:text-red-600 transition shrink-0">
                         <X size={16} />
                       </button>
                     )}
                     {index === pekerjaList.length - 1 && (
-                      <button
-                        onClick={handleAddPekerja}
-                        className="w-8 h-9 bg-blue-600 hover:bg-blue-700 text-white rounded flex items-center justify-center shrink-0 transition"
-                      >
+                      <button onClick={handleAddPekerja} className="w-8 h-9 bg-blue-600 hover:bg-blue-700 text-white rounded flex items-center justify-center shrink-0 transition">
                         <Plus size={15} />
                       </button>
                     )}
@@ -206,7 +191,7 @@ export default function SikaNewPage() {
           <div className="flex justify-end gap-3 py-6 px-8 border-t border-gray-100">
             <button
               onClick={handleSaveClose}
-               className="px-6 py-2 rounded-lg bg-green-500 hover:bg-green-600 text-white text-sm font-semibold transition shadow-md shadow-green-200"
+              className="px-6 py-2 rounded-lg bg-green-500 hover:bg-green-600 text-white text-sm font-semibold transition shadow-md shadow-green-200"
             >
               Save and Close
             </button>

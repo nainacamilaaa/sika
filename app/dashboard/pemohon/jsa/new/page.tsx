@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Menu, X, FileText, Upload, ChevronRight } from 'lucide-react';
+import { FileText, Upload, X } from 'lucide-react';
 import { useProgramStore } from '@/store/programStore';
 
 export default function EntryJSAPage() {
@@ -23,20 +23,25 @@ export default function EntryJSAPage() {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const formatTanggal = (dateStr: string) => {
+    if (!dateStr) return '';
+    const [y, m, d] = dateStr.split('-');
+    return `${d}-${m}-${y}`;
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     setError('');
     const selectedFiles = Array.from(e.target.files || []);
-    
-    // Validasi file PDF dan ukuran max 10MB per file
+
     const invalidFiles = selectedFiles.filter(
       (file) => file.type !== 'application/pdf' || file.size > 10 * 1024 * 1024
     );
-    
+
     if (invalidFiles.length > 0) {
       setError('Hanya file PDF dengan maksimal ukuran 10MB per file yang diperbolehkan.');
       return;
     }
-    
+
     setFiles((prev) => [...prev, ...selectedFiles]);
   };
 
@@ -45,12 +50,11 @@ export default function EntryJSAPage() {
   };
 
   const handleSaveClose = () => {
-    // Validasi dokumen dihapus - tidak wajib lagi
     setJSA({
       jsaNo: '',
       kontraktor: form.kontraktor,
       lokasi: form.lokasi,
-      tanggalJSA: form.tanggalJSA,
+      tanggalJSA: formatTanggal(form.tanggalJSA),
       namaJSA: form.namaJSA,
       dokumen: files.map((f) => f.name),
     });
@@ -59,12 +63,11 @@ export default function EntryJSAPage() {
   };
 
   const handleNext = () => {
-    // Validasi dokumen dihapus - tidak wajib lagi
     setJSA({
       jsaNo: '',
       kontraktor: form.kontraktor,
       lokasi: form.lokasi,
-      tanggalJSA: form.tanggalJSA,
+      tanggalJSA: formatTanggal(form.tanggalJSA),
       namaJSA: form.namaJSA,
       dokumen: files.map((f) => f.name),
     });
@@ -148,8 +151,7 @@ export default function EntryJSAPage() {
               </label>
               <span className="text-gray-400 shrink-0">:</span>
               <input
-                type="text"
-                placeholder="DD-MM-YYYY"
+                type="date"
                 value={form.tanggalJSA}
                 onChange={(e) => handleChange('tanggalJSA', e.target.value)}
                 className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400"
@@ -178,7 +180,6 @@ export default function EntryJSAPage() {
               </label>
               <span className="text-gray-400 shrink-0">:</span>
               <div className="flex-1 space-y-3">
-                {/* Upload Area */}
                 <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-400 transition">
                   <input
                     type="file"
@@ -200,7 +201,6 @@ export default function EntryJSAPage() {
                   </label>
                 </div>
 
-                {/* Daftar File yang Diupload */}
                 {files.length > 0 && (
                   <div className="space-y-2">
                     <p className="text-sm font-medium text-gray-700">File terupload ({files.length}):</p>
@@ -239,27 +239,28 @@ export default function EntryJSAPage() {
 
           </div>
 
-        {/* ─── FOOTER BUTTONS ─── */}
-        <div className="flex justify-end gap-3 py-6 px-8 border-t border-gray-100">
-          <button
-            onClick={handleBack}
-            className="px-6 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition shadow-md shadow-red-200"
-          >
-            Back
-          </button>
-          <button
-            onClick={handleSaveClose}
-            className="px-6 py-2 rounded-lg bg-green-500 hover:bg-green-600 text-white text-sm font-semibold transition shadow-md shadow-green-200"
-          >
-            Save and Close
-          </button>
-          <button
-            onClick={handleNext}
-            className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition shadow-md shadow-blue-200"
-          >
-            Next
-          </button>
-        </div>
+          {/* ─── FOOTER BUTTONS ─── */}
+          <div className="flex justify-end gap-3 py-6 px-8 border-t border-gray-100">
+            <button
+              onClick={handleBack}
+              className="px-6 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition shadow-md shadow-red-200"
+            >
+              Back
+            </button>
+            <button
+              onClick={handleSaveClose}
+              className="px-6 py-2 rounded-lg bg-green-500 hover:bg-green-600 text-white text-sm font-semibold transition shadow-md shadow-green-200"
+            >
+              Save and Close
+            </button>
+            <button
+              onClick={handleNext}
+              className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition shadow-md shadow-blue-200"
+            >
+              Next
+            </button>
+          </div>
+
         </div>
       </div>
     </div>

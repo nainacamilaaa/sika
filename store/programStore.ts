@@ -62,6 +62,15 @@ interface RTLData {
   tingkatResikoSetelah: string;
 }
 
+interface SikaData {
+  fungsiPerusahaan: string;
+  lokasiInstalasi: string;
+  peralatanNoIdentitas: string;
+  uraianPekerjaan: string;
+  peralatanDigunakan: string;
+  pekerjaList: string[];
+}
+
 interface WorkPermitData {
   no: number;
   noWP: string;
@@ -69,7 +78,6 @@ interface WorkPermitData {
   tanggalMulai: string;
   tanggalSelesai: string;
   status: 'Draft' | 'Open' | 'Closed' | 'Approved' | 'Rejected';
-  // ─── field lengkap dari form pemohon ───
   sumberBahaya: string[];
   alatPelindung: string[];
   safetyChecklist: Record<string, boolean>;
@@ -78,6 +86,7 @@ interface WorkPermitData {
 interface ProgramStore {
   program: ProgramData | null;
   jsa: JSAData | null;
+  sika: SikaData | null;
   aktivitasList: AktivitasData[];
   pendingRTL: PendingRTL | null;
   rtlList: RTLData[];
@@ -85,8 +94,12 @@ interface ProgramStore {
   approveDate: string | null;
   savedWPs: string[];
   workPermitList: WorkPermitData[];
+  // ── Sertifikat yang sudah diisi ──
+  filledSertifikat: string[];
+
   setProgram: (data: ProgramData) => void;
   setJSA: (data: JSAData) => void;
+  setSika: (data: SikaData) => void;
   addAktivitas: (data: Omit<AktivitasData, 'no'>) => void;
   removeAktivitas: (no: number) => void;
   setPendingRTL: (data: PendingRTL) => void;
@@ -97,6 +110,9 @@ interface ProgramStore {
   addWorkPermit: (data: Omit<WorkPermitData, 'no'>) => void;
   updateWorkPermitStatus: (noWP: string, status: WorkPermitData['status']) => void;
   removeWorkPermit: (no: number) => void;
+  // ── Actions sertifikat ──
+  markSertifikatFilled: (nama: string) => void;
+  unmarkSertifikat: (nama: string) => void;
   reset: () => void;
 }
 
@@ -105,6 +121,7 @@ export const useProgramStore = create<ProgramStore>()(
     (set) => ({
       program: null,
       jsa: null,
+      sika: null,
       aktivitasList: [],
       pendingRTL: null,
       rtlList: [],
@@ -112,9 +129,11 @@ export const useProgramStore = create<ProgramStore>()(
       approveDate: null,
       savedWPs: [],
       workPermitList: [],
+      filledSertifikat: [],
 
       setProgram: (data) => set({ program: data }),
       setJSA: (data) => set({ jsa: data }),
+      setSika: (data) => set({ sika: data }),
 
       addAktivitas: (data) =>
         set((state) => ({
@@ -170,10 +189,23 @@ export const useProgramStore = create<ProgramStore>()(
             .map((w, i) => ({ ...w, no: i + 1 })),
         })),
 
+      markSertifikatFilled: (nama) =>
+        set((state) => ({
+          filledSertifikat: state.filledSertifikat.includes(nama)
+            ? state.filledSertifikat
+            : [...state.filledSertifikat, nama],
+        })),
+
+      unmarkSertifikat: (nama) =>
+        set((state) => ({
+          filledSertifikat: state.filledSertifikat.filter((v) => v !== nama),
+        })),
+
       reset: () =>
         set({
           program: null,
           jsa: null,
+          sika: null,
           aktivitasList: [],
           pendingRTL: null,
           rtlList: [],
@@ -181,6 +213,7 @@ export const useProgramStore = create<ProgramStore>()(
           approveDate: null,
           savedWPs: [],
           workPermitList: [],
+          filledSertifikat: [],
         }),
     }),
     { name: 'sika-program' }

@@ -14,11 +14,13 @@ export default function EntryProgramPage() {
     noKontrak: '',
     tanggalKontrak: '',
     satKerjaPemberi: '',
-    picPemberi: '',
-    satKerjaPenanggung: '',
-    picPenanggung: '',
     pelaksanaJenis: '',
     pelaksanaPerusahaan: '',
+    picPemberi: '',
+    pimpinanPelaksana: '',
+    satKerjaPenanggung: '',
+    fungsiIA: '',
+    picPenanggung: '',
   });
 
   const handleChange = (field: string, value: string) => {
@@ -66,6 +68,21 @@ export default function EntryProgramPage() {
   const opsiPIC = ['Test 1', 'Test 2', 'Test 3'];
   const opsiPelaksana = ['Test 1', 'Test 2', 'Test 3'];
   const opsiPerusahaan = ['Test 1', 'Test 2', 'Test 3'];
+  const opsiFungsiIA = [
+    'Procurement & Facilities Management',
+    'Technical Management',
+    'Infrastructure Management',
+    'Operation West Region',
+    'Operation East Region',
+    'Operation North Sumatra Area',
+    'Operation Central Sumatra Area',
+    'Operation South Sumatra Area',
+    'Operation Dumai Area',
+    'Operation Rokan Area',
+    'Operation West Java Area',
+    'Operation East Java Area',
+    'Operation Kalimantan Area'
+  ];
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -122,7 +139,7 @@ export default function EntryProgramPage() {
             {/* Nama Paket Pekerjaan */}
             <div className="flex items-center gap-4">
               <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
-                Nama Paket Pekerjaan (Kontrak)
+                Judul Kontrak Kerja
               </label>
               <span className="text-gray-400 shrink-0">:</span>
               <input
@@ -171,7 +188,7 @@ export default function EntryProgramPage() {
             {/* Fungsi Pemberi Kerja */}
             <div className="flex items-center gap-4">
               <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
-                Fungsi (Pemberi Kerja)
+                Fungsi (Penanggung Jawab Pekerjaan)
               </label>
               <span className="text-gray-400 shrink-0">:</span>
               <select
@@ -184,16 +201,63 @@ export default function EntryProgramPage() {
               </select>
             </div>
 
-            {/* PIC Pemberi Kerja */}
+            {/* ── DIPINDAH KE SINI: Perusahaan Pelaksana ── */}
             <div className="flex items-center gap-4">
               <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
-                PA (Pelaksana Pekerjaan)
+                Perusahaan Pelaksana
+              </label>
+              <span className="text-gray-400 shrink-0">:</span>
+              <div className="flex-1 flex gap-2">
+                <select
+                  value={form.pelaksanaJenis}
+                  onChange={(e) => handleChange('pelaksanaJenis', e.target.value)}
+                  className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                >
+                  <option value="">-- Jenis --</option>
+                  {opsiPelaksana.map((o) => <option key={o}>{o}</option>)}
+                </select>
+                <select
+                  value={form.pelaksanaPerusahaan}
+                  onChange={(e) => handleChange('pelaksanaPerusahaan', e.target.value)}
+                  className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                >
+                  <option value="">-- Perusahaan --</option>
+                  {opsiPerusahaan.map((o) => <option key={o}>{o}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {/* PA - Pelaksana Pekerjaan */}
+            <div className="flex items-center gap-4">
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
+                PA (Pelaksana Pekerjaan/Performing Authority)
               </label>
               <span className="text-gray-400 shrink-0">:</span>
               <div className="flex-1 flex gap-2">
                 <select
                   value={form.picPemberi}
                   onChange={(e) => handleChange('picPemberi', e.target.value)}
+                  className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                >
+                  <option value="">-- Pilih --</option>
+                  {opsiPIC.map((o) => <option key={o}>{o}</option>)}
+                </select>
+                <button className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded transition whitespace-nowrap">
+                  Tambah PIC
+                </button>
+              </div>
+            </div>
+
+            {/* ── BARU: Pimpinan Pelaksana Pekerjaan (PPA) ── */}
+            <div className="flex items-center gap-4">
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
+                Pimpinan Pelaksana Pekerjaan (PPA)
+              </label>
+              <span className="text-gray-400 shrink-0">:</span>
+              <div className="flex-1 flex gap-2">
+                <select
+                  value={form.pimpinanPelaksana}
+                  onChange={(e) => handleChange('pimpinanPelaksana', e.target.value)}
                   className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
                 >
                   <option value="">-- Pilih --</option>
@@ -221,10 +285,26 @@ export default function EntryProgramPage() {
               </select>
             </div>
 
-            {/* PIC Penanggung Jawab Aset */}
+            {/* ── BARU: Fungsi IA (Pemberi Izin Aset) ── */}
             <div className="flex items-center gap-4">
               <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
-                PIC (Penanggung Jawab Aset)
+                Fungsi IA (Pemberi Izin Aset/Asset Holder/Issuing Authority)
+              </label>
+              <span className="text-gray-400 shrink-0">:</span>
+              <select
+                value={form.fungsiIA}
+                onChange={(e) => handleChange('fungsiIA', e.target.value)}
+                className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+              >
+                <option value="">-- Pilih --</option>
+                {opsiFungsiIA.map((o) => <option key={o}>{o}</option>)}
+              </select>
+            </div>
+
+            {/* PIC IA - Pemberi Izin Aset */}
+            <div className="flex items-center gap-4">
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
+                PIC IA (Pemberi Izin Aset/Asset Holder/Issuing Authority)
               </label>
               <span className="text-gray-400 shrink-0">:</span>
               <div className="flex-1 flex gap-2">
@@ -242,49 +322,24 @@ export default function EntryProgramPage() {
               </div>
             </div>
 
-            {/* Pelaksana */}
-            <div className="flex items-center gap-4">
-              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
-                Pelaksana
-              </label>
-              <span className="text-gray-400 shrink-0">:</span>
-              <div className="flex-1 flex gap-2">
-                <select
-                  value={form.pelaksanaJenis}
-                  onChange={(e) => handleChange('pelaksanaJenis', e.target.value)}
-                  className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
-                >
-                  <option value="">-- Jenis --</option>
-                  {opsiPelaksana.map((o) => <option key={o}>{o}</option>)}
-                </select>
-                <select
-                  value={form.pelaksanaPerusahaan}
-                  onChange={(e) => handleChange('pelaksanaPerusahaan', e.target.value)}
-                  className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
-                >
-                  <option value="">-- Perusahaan --</option>
-                  {opsiPerusahaan.map((o) => <option key={o}>{o}</option>)}
-                </select>
-              </div>
-            </div>
-
           </div>
 
-        {/* ─── FOOTER BUTTONS ─── */}
-        <div className="flex justify-end gap-3 py-6 px-8 border-t border-gray-100">
-          <button
-            onClick={handleSaveClose}
-            className="px-6 py-2 rounded-lg bg-green-500 hover:bg-green-600 text-white text-sm font-semibold transition shadow-md shadow-green-200"
-          >
-            Save and Close
-          </button>
-          <button
-            onClick={handleNext}
-            className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition shadow-md shadow-blue-200"
-          >
-            Next
-          </button>
-        </div>
+          {/* ─── FOOTER BUTTONS ─── */}
+          <div className="flex justify-end gap-3 py-6 px-8 border-t border-gray-100">
+            <button
+              onClick={handleSaveClose}
+              className="px-6 py-2 rounded-lg bg-green-500 hover:bg-green-600 text-white text-sm font-semibold transition shadow-md shadow-green-200"
+            >
+              Save and Close
+            </button>
+            <button
+              onClick={handleNext}
+              className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition shadow-md shadow-blue-200"
+            >
+              Next
+            </button>
+          </div>
+
         </div>
       </div>
     </div>

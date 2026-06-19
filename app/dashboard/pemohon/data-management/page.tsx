@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { Menu, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useProgramStore } from '@/store/programStore';
 import { useState } from 'react';
 
@@ -156,7 +156,10 @@ export default function DataManagementPemohonPage() {
                     <td className="px-4 py-3 text-gray-700">{jsa.namaJSA || '-'}</td>
                     <td className="px-4 py-3">{getStatusBadge(jsaStatus)}</td>
                     <td className="px-4 py-3">
-                      {jsaStatus === 'approved' ? (
+                      {/* TESTING MODE: tombol Request SIKA muncul selama data JSA ada,
+                          tanpa perlu status 'approved'. Untuk aktifkan kembali approval,
+                          ganti kondisi `jsa` menjadi `jsaStatus === 'approved'` */}
+                      {jsa ? (
                         <button
                           onClick={() => router.push('/dashboard/pemohon/sika/new')}
                           className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded transition"
