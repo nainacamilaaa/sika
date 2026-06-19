@@ -5,6 +5,31 @@ import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import { useProgramStore } from '@/store/programStore';
 
+// Helper untuk menyimpan dan mengambil data dari sessionStorage
+const STORAGE_KEY = 'sika_pemeriksaan_state';
+
+const loadState = () => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const saved = sessionStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch (e) {
+    console.error('Failed to load state:', e);
+  }
+  return null;
+};
+
+const saveState = (data: any) => {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch (e) {
+    console.error('Failed to save state:', e);
+  }
+};
+
 const CheckItem = ({
   label, checked, onChange,
 }: { label: string; checked: boolean; onChange: () => void }) => (
@@ -25,12 +50,10 @@ export default function SikaPemeriksaanPage() {
 
   const isolasiCol1 = ['Electrical Circuits', 'Gas Valve', 'Water Valves'];
   const isolasiCol2 = ['Air Instrument Valves', 'Mekanik', 'Pneumatic/Hydraulic'];
-  const [isolasi, setIsolasi] = useState<string[]>([]);
-
+  
   const lampiranCol1 = ['JSA', 'TKO, TKI, TKPA', 'P&ID, Underground Maps'];
   const lampiranCol2 = ['Koordinator PLN', 'Koordinator Telcom', 'Koordinator PDAM'];
   const lampiranCol3 = ['Koordinator BPJN', 'BA Sosialisasi', 'Perizinan Lahan'];
-  const [lampiran, setLampiran] = useState<string[]>([]);
 
   const identifikasiCol1 = [
     'Gas Lemas, mudah terbakar/beracun', 'Kekurangan Oksigen',
@@ -52,8 +75,6 @@ export default function SikaPemeriksaanPage() {
     'Biohazard', 'Iritasi mata/kulit', 'Gangguan pernapasan',
     'Faktor fisik/biologis', 'Gangguan keamanan', 'Pencurian',
   ];
-  const [identifikasi, setIdentifikasi] = useState<string[]>([]);
-  const [identifikasiTambahan, setIdentifikasiTambahan] = useState('');
 
   const pengendalianCol1 = [
     'HSE Plan', 'Topi/Sepatu/Coverall keselamatan',
@@ -79,8 +100,6 @@ export default function SikaPemeriksaanPage() {
     'Didinginkan secara mekanis',
     'Memenuhi persyaratan sertifikat kerja',
   ];
-  const [pengendalian, setPengendalian] = useState<string[]>([]);
-  const [permintaanTambahan, setPermintaanTambahan] = useState('');
 
   const [showModal, setShowModal] = useState(false);
 
@@ -101,18 +120,78 @@ export default function SikaPemeriksaanPage() {
 
   const allSertifikat = [...sertifikatCol1, ...sertifikatCol2];
 
-  const [sertifikat, setSertifikat] = useState<string[]>([]);
-  const [sifatPekerjaan, setSifatPekerjaan] = useState('');
+  // State yang akan disimpan di sessionStorage
+  const [isolasi, setIsolasi] = useState<string[]>(() => {
+    const saved = loadState();
+    return saved?.isolasi || [];
+  });
+
+  const [lampiran, setLampiran] = useState<string[]>(() => {
+    const saved = loadState();
+    return saved?.lampiran || [];
+  });
+
+  const [identifikasi, setIdentifikasi] = useState<string[]>(() => {
+    const saved = loadState();
+    return saved?.identifikasi || [];
+  });
+
+  const [identifikasiTambahan, setIdentifikasiTambahan] = useState(() => {
+    const saved = loadState();
+    return saved?.identifikasiTambahan || '';
+  });
+
+  const [pengendalian, setPengendalian] = useState<string[]>(() => {
+    const saved = loadState();
+    return saved?.pengendalian || [];
+  });
+
+  const [permintaanTambahan, setPermintaanTambahan] = useState(() => {
+    const saved = loadState();
+    return saved?.permintaanTambahan || '';
+  });
+
+  const [sertifikat, setSertifikat] = useState<string[]>(() => {
+    const saved = loadState();
+    return saved?.sertifikat || [];
+  });
+
+  const [sifatPekerjaan, setSifatPekerjaan] = useState(() => {
+    const saved = loadState();
+    return saved?.sifatPekerjaan || '';
+  });
+
   const sifatOptions = ['Normal', 'Proyek', 'T/A', 'Emergency'];
 
-  // Saat komponen mount, inisialisasi sertifikat dari filledSertifikat
+  // Simpan state ke sessionStorage setiap kali berubah
   useEffect(() => {
-    // Sertifikat yang sudah terisi di store otomatis akan tercentang
-    // Sertifikat yang belum terisi tapi sudah dipilih sebelumnya akan tetap di state
-    const initialSertifikat = allSertifikat.filter(item => filledSertifikat.includes(item));
+    const state = {
+      isolasi,
+      lampiran,
+      identifikasi,
+      identifikasiTambahan,
+      pengendalian,
+      permintaanTambahan,
+      sertifikat,
+      sifatPekerjaan,
+    };
+    saveState(state);
+  }, [
+    isolasi,
+    lampiran,
+    identifikasi,
+    identifikasiTambahan,
+    pengendalian,
+    permintaanTambahan,
+    sertifikat,
+    sifatPekerjaan,
+  ]);
+
+  // Sinkronkan sertifikat yang sudah terisi dari store
+  useEffect(() => {
+    const filled = allSertifikat.filter(item => filledSertifikat.includes(item));
     setSertifikat(prev => {
-      // Gabungkan yang sudah terisi dengan yang sudah dipilih sebelumnya
-      const combined = [...new Set([...prev, ...initialSertifikat])];
+      const combined = [...new Set([...prev, ...filled])];
       return combined;
     });
   }, [filledSertifikat]);
@@ -133,7 +212,6 @@ export default function SikaPemeriksaanPage() {
   const toggleSertifikat = (val: string) => {
     // Jika sudah terisi di store, tidak bisa di-uncheck
     if (filledSertifikat.includes(val)) {
-      // Redirect ke halaman sertifikat jika sudah terisi
       const route = sertifikatRoutes[val];
       if (route) {
         router.push(route);
@@ -163,10 +241,13 @@ export default function SikaPemeriksaanPage() {
 
   // Handler untuk menyimpan dan menutup modal
   const handleSimpan = () => {
-    // Semua sertifikat yang sudah terisi tetap dipertahankan
-    // Tidak ada yang di-uncheck
     setShowModal(false);
     router.push('/dashboard/pemohon/data-management');
+  };
+
+  // Hapus state dari sessionStorage saat logout atau selesai
+  const handleClearState = () => {
+    sessionStorage.removeItem(STORAGE_KEY);
   };
 
   return (
@@ -277,7 +358,10 @@ export default function SikaPemeriksaanPage() {
         {/* FOOTER BUTTONS */}
         <div className="flex justify-end gap-3 py-2">
           <button
-            onClick={() => router.push('/dashboard/pemohon/sika/new')}
+            onClick={() => {
+              handleClearState();
+              router.push('/dashboard/pemohon/sika/new');
+            }}
             className="flex items-center gap-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-medium px-6 py-2 rounded-lg transition shadow-md shadow-red-200"
           >
             Back
