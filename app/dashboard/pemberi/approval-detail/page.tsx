@@ -76,15 +76,15 @@ export default function ApprovalDetailPage() {
               { label: 'No Kontrak', value: program?.noKontrak },
               { label: 'Tanggal Kontrak', value: program?.tanggalKontrak },
               { label: 'Satuan Kerja', value: program?.satKerjaPemberi },
-              { label: 'Reviewer', value: program?.picPemberi },
+              { label: 'Reviewer', value: program?.picPemberiList?.join(', ') },
               { label: 'Perusahaan (Penanggung Jawab Aset)', value: program?.pelaksanaPerusahaan },
               { label: 'Satuan Kerja (Penanggung Jawab Aset)', value: program?.satKerjaPenanggung },
-              { label: 'PIC (Penanggung Jawab Aset)', value: program?.picPenanggung },
+              { label: 'PIC (Penanggung Jawab Aset)', value: program?.picPenanggungList?.join(', ') },
               { label: 'Pelaksana', value: `${program?.pelaksanaPerusahaan || '-'} (${program?.pelaksanaJenis || '-'})` },
             ].map((item) => (
               <div key={item.label} className="flex gap-3">
-                <span className="w-56 text-gray-600 flex-shrink-0">{item.label}</span>
-                <span className="text-gray-400 flex-shrink-0">:</span>
+                <span className="w-56 text-gray-600 shrink-0">{item.label}</span>
+                <span className="text-gray-400 shrink-0">:</span>
                 <span className="text-gray-800">{item.value || '-'}</span>
               </div>
             ))}
