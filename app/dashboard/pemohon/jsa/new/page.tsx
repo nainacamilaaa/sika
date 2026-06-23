@@ -1,81 +1,195 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FileText, Upload, X } from 'lucide-react';
 import { useProgramStore } from '@/store/programStore';
 
-export default function EntryJSAPage() {
+type RiskLevel = string;
+
+interface JSARow {
+  id: string;
+  langkah: string;
+  peralatan: string;
+  potensiBahaya: string;
+  tingkatRisiko: RiskLevel;
+  mitigasi: string;
+  penanggungjawab: string;
+}
+
+interface JSASection {
+  key: string;
+  label: string;
+  rows: JSARow[];
+}
+
+interface PPEItem {
+  label: string;
+  checked: boolean;
+}
+
+const makeRow = (id: string): JSARow => ({
+  id,
+  langkah: '',
+  peralatan: '',
+  potensiBahaya: '',
+  tingkatRisiko: '',
+  mitigasi: '',
+  penanggungjawab: '',
+});
+
+const getRiskStyle = (value: string): { bg: string; text: string } => {
+  const v = value.trim().toLowerCase();
+  if (!v) return { bg: '#f1f5f9', text: '#94a3b8' };
+  if (v.includes('tinggi') || v.includes('high')) return { bg: '#fef2f2', text: '#b91c1c' };
+  if (v.includes('sedang') || v.includes('medium') || v.includes('med')) return { bg: '#fefce8', text: '#a16207' };
+  if (v.includes('rendah') || v.includes('low')) return { bg: '#f0fdf4', text: '#15803d' };
+  return { bg: '#f1f5f9', text: '#64748b' };
+};
+
+const INITIAL_SECTIONS: JSASection[] = [
+  { key: 'A', label: 'Persiapan Awal',        rows: [makeRow('A1'), makeRow('A2')] },
+  { key: 'B', label: 'Pelaksanaan Pekerjaan', rows: [makeRow('B1'), makeRow('B2')] },
+  { key: 'C', label: 'Selesai Pekerjaan',     rows: [makeRow('C1'), makeRow('C2')] },
+];
+
+const INITIAL_PPE: PPEItem[][] = [
+  [
+    { label: 'Safety Helmet',              checked: false },
+    { label: 'Goggles / Face Shield',      checked: false },
+    { label: 'Leather / Chemical Gloves',  checked: false },
+    { label: 'Safety Sign',                checked: false },
+  ],
+  [
+    { label: 'Safety Shoes',               checked: false },
+    { label: 'Earplug / Earmuff',          checked: false },
+    { label: 'Safety Harness / Lifelines', checked: false },
+    { label: 'SIKA',                       checked: false },
+  ],
+  [
+    { label: 'Safety Glasses',             checked: false },
+    { label: 'Dust / Welding Mask',        checked: false },
+    { label: 'Life Vest',                  checked: false },
+    { label: 'Radio Communication',        checked: false },
+  ],
+  [
+    { label: 'Coveralls',                  checked: false },
+    { label: 'Catridge / Filter Mask',     checked: false },
+    { label: 'Fire Extinguisher',          checked: false },
+    { label: 'Others :',                   checked: false },
+  ],
+];
+
+export default function DetailJSAPage() {
   const router = useRouter();
+  const jsa = useProgramStore((s) => s.jsa);
   const setJSA = useProgramStore((s) => s.setJSA);
 
-  const [form, setForm] = useState({
-    kontraktor: '',
-    lokasi: '',
-    tanggalJSA: '',
-    namaJSA: '',
+  const [meta, setMeta] = useState({
+    judulPekerjaan: jsa?.judulPekerjaan ?? '',
+    tanggal: jsa?.tanggalJSA ?? '',
+    lokasi: jsa?.lokasi ?? '',
+    halaman: jsa?.halaman ?? '1',
+    totalHalaman: jsa?.totalHalaman ?? '1',
+    noSIKA: jsa?.jsaNo ?? '',
+    status: (jsa?.status ?? 'baru') as 'baru' | 'revisi',
   });
 
-  const [files, setFiles] = useState<File[]>([]);
-  const [error, setError] = useState('');
-
-  const handleChange = (field: string, value: string) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const formatTanggal = (dateStr: string) => {
-    if (!dateStr) return '';
-    const [y, m, d] = dateStr.split('-');
-    return `${d}-${m}-${y}`;
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setError('');
-    const selectedFiles = Array.from(e.target.files || []);
-
-    const invalidFiles = selectedFiles.filter(
-      (file) => file.type !== 'application/pdf' || file.size > 10 * 1024 * 1024
+  const [sections, setSections] = useState<JSASection[]>(
+    jsa?.sections?.length ? jsa.sections : INITIAL_SECTIONS
+  );
+  const [ppe, setPpe] = useState<PPEItem[][]>(() => {
+    if (!jsa?.checkedPPE?.length) return INITIAL_PPE;
+    return INITIAL_PPE.map((row) =>
+      row.map((item) => ({ ...item, checked: jsa.checkedPPE.includes(item.label) }))
     );
+  });
 
-    if (invalidFiles.length > 0) {
-      setError('Hanya file PDF dengan maksimal ukuran 10MB per file yang diperbolehkan.');
-      return;
-    }
-
-    setFiles((prev) => [...prev, ...selectedFiles]);
+  const handleMetaChange = (field: string, value: string) => {
+    setMeta((prev) => ({ ...prev, [field]: value }));
   };
 
-  const removeFile = (index: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
+  const updateRow = (sectionKey: string, rowId: string, field: keyof JSARow, value: string) => {
+    setSections((prev) =>
+      prev.map((sec) =>
+        sec.key !== sectionKey ? sec : {
+          ...sec,
+          rows: sec.rows.map((row) => row.id !== rowId ? row : { ...row, [field]: value }),
+        }
+      )
+    );
   };
+
+  const addRow = (sectionKey: string) => {
+    setSections((prev) =>
+      prev.map((sec) => {
+        if (sec.key !== sectionKey) return sec;
+        const nextNum = sec.rows.length + 1;
+        return { ...sec, rows: [...sec.rows, makeRow(`${sectionKey}${nextNum}`)] };
+      })
+    );
+  };
+
+  const removeRow = (sectionKey: string, rowId: string) => {
+    setSections((prev) =>
+      prev.map((sec) =>
+        sec.key !== sectionKey ? sec : { ...sec, rows: sec.rows.filter((r) => r.id !== rowId) }
+      )
+    );
+  };
+
+  const togglePPE = (rowIdx: number, colIdx: number) => {
+    setPpe((prev) =>
+      prev.map((row, ri) =>
+        ri !== rowIdx ? row : row.map((item, ci) =>
+          ci !== colIdx ? item : { ...item, checked: !item.checked }
+        )
+      )
+    );
+  };
+
+  // Gabungkan meta + sections + PPE jadi satu objek JSAData lengkap untuk disimpan ke store.
+  const buildJSAData = () => ({
+    jsaNo: meta.noSIKA,
+    kontraktor: jsa?.kontraktor ?? '',
+    lokasi: meta.lokasi,
+    tanggalJSA: meta.tanggal,
+    namaJSA: meta.judulPekerjaan,
+    dokumen: jsa?.dokumen ?? [],
+    judulPekerjaan: meta.judulPekerjaan,
+    halaman: meta.halaman,
+    totalHalaman: meta.totalHalaman,
+    status: meta.status,
+    sections,
+    checkedPPE: ppe.flat().filter((item) => item.checked).map((item) => item.label),
+  });
 
   const handleSaveClose = () => {
-    setJSA({
-      jsaNo: '',
-      kontraktor: form.kontraktor,
-      lokasi: form.lokasi,
-      tanggalJSA: formatTanggal(form.tanggalJSA),
-      namaJSA: form.namaJSA,
-      dokumen: files.map((f) => f.name),
-    });
-    alert('Data JSA disimpan sebagai draft.');
+    setJSA(buildJSAData());
+    alert('Data Detail JSA disimpan sebagai draft.');
     router.push('/dashboard/pemohon');
   };
 
-  const handleNext = () => {
-    setJSA({
-      jsaNo: '',
-      kontraktor: form.kontraktor,
-      lokasi: form.lokasi,
-      tanggalJSA: formatTanggal(form.tanggalJSA),
-      namaJSA: form.namaJSA,
-      dokumen: files.map((f) => f.name),
-    });
+  const handleSubmit = () => {
+    setJSA(buildJSAData());
     router.push('/dashboard/pemohon/jsa/detail');
   };
 
-  const handleBack = () => {
-    router.back();
+  const handleBack = () => router.back();
+
+  const inputStyle = {
+  background: '#ffffff',
+  border: '1.5px solid #cbd5e1',
+  boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+  };
+
+  const inputFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+  e.target.style.border = '1.5px solid #3b82f6';
+  e.target.style.background = '#eff6ff';
+  };
+
+  const inputBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+  e.target.style.border = '1.5px solid #cbd5e1';
+  e.target.style.background = '#ffffff';
   };
 
   return (
@@ -83,163 +197,395 @@ export default function EntryJSAPage() {
 
       {/* ─── TOP NAVBAR ─── */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3" style={{ paddingLeft: '30px' }}>
-          <div className="flex items-center gap-2">
-            <img
-              src="/logosika.svg"
-              alt="SIKA"
-              className="h-7 object-contain"
-            />
-            <span className="font-bold text-gray-800 text-sm tracking-wide">ENTRY DATA</span>
-          </div>
+        <div className="flex items-center gap-2" style={{ paddingLeft: '30px' }}>
+          <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
+          <div className="w-px h-5 bg-gray-300 mx-2" />
+          <span className="text-xs font-bold text-blue-600 uppercase tracking-widest">Job Safety Analysis(JSA)</span>
         </div>
-        <div className="text-sm font-medium flex items-center gap-1">
-          <span className="text-blue-400 cursor-pointer hover:underline">PROGRAM</span>
-          <span className="text-gray-400">&gt;</span>
-          <span className="text-blue-800 cursor-pointer hover:underline">JSA</span>
-          <span className="text-gray-400">&gt;</span>
-          <span className="text-blue-400 cursor-pointer hover:underline">DETAIL JSA</span>
+
+        <div className="flex items-center gap-0">
+          {[
+            { label: 'Program', active: false },
+            { label: 'Pengisian SIKA', active: false },
+            { label: 'Pengisian JSA', active: true },
+            { label: 'Detail Program', active: false },
+          ].map((step, i, arr) => (
+            <div key={step.label} className="flex items-center">
+              <div className="flex items-center gap-2 px-3">
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                  step.active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'
+                }`}>
+                  {i + 1}
+                </div>
+                <span className={`text-xs font-medium ${step.active ? 'text-blue-600' : 'text-gray-400'}`}>
+                  {step.label}
+                </span>
+              </div>
+              {i < arr.length - 1 && <div className="w-8 h-px bg-gray-200" />}
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* ─── CONTENT ─── */}
-      <div className="px-6 py-8">
-        <div className="bg-white rounded border-2 border-blue-400 overflow-hidden">
+    {/* ── CONTENT ── */}
+    <div className="px-6 py-8">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
 
-          {/* Header */}
-          <div className="bg-blue-100 px-6 py-3 border-b border-blue-200">
-            <span className="text-blue-700 font-bold text-base">ENTRY JOB SAFETY ANALYSIS</span>
+    {/* Card Header */}
+    <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between"
+      style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
+      <div>
+        <span className="text-white font-bold text-sm tracking-wide">DETAIL JOB SAFETY ANALYSIS</span>
+        <p className="text-blue-200 text-xs mt-0.5">Isi seluruh kolom dengan lengkap dan benar</p>
+      </div>
+      <span className="text-xs bg-white/20 text-white px-3 py-1 rounded-full font-medium">
+        JSA Form
+      </span>
+    </div>
+
+          {/* ── META HEADER ── */}
+          <div className="px-8 py-4">
+            <table className="w-full text-sm border-collapse">
+              <colgroup>
+                <col className="w-44" />
+                <col className="w-6" />
+                <col />
+                <col className="w-8" />
+                <col className="w-28" />
+                <col className="w-6" />
+                <col />
+              </colgroup>
+              <tbody>
+                <tr>
+                  <td className="py-1 font-medium text-gray-700 whitespace-nowrap">Judul Pekerjaan</td>
+                  <td className="py-1 px-3 text-gray-400">:</td>
+                  <td className="py-1 pr-10">
+                    <input
+                      type="text"
+                      value={meta.judulPekerjaan}
+                      onChange={(e) => handleMetaChange('judulPekerjaan', e.target.value)}
+                      placeholder="Masukkan judul pekerjaan"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder-gray-400"
+                    />
+                  </td>
+                  <td />
+                  <td className="py-1 font-medium text-gray-700 whitespace-nowrap">Tanggal</td>
+                  <td className="py-1 px-3 text-gray-400">:</td>
+                  <td className="py-1">
+                    <input
+                      type="date"
+                      value={meta.tanggal}
+                      onChange={(e) => handleMetaChange('tanggal', e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    />
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-1 font-medium text-gray-700 whitespace-nowrap">Lokasi</td>
+                  <td className="py-1 px-3 text-gray-400">:</td>
+                  <td className="py-1 pr-10">
+                    <input
+                      type="text"
+                      value={meta.lokasi}
+                      onChange={(e) => handleMetaChange('lokasi', e.target.value)}
+                      placeholder="Masukkan lokasi kerja"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder-gray-400"
+                    />
+                  </td>
+                  <td />
+                  <td className="py-1 font-medium text-gray-700 whitespace-nowrap">Halaman</td>
+                  <td className="py-1 px-3 text-gray-400">:</td>
+                  <td className="py-1">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        min={1}
+                        value={meta.halaman}
+                        onChange={(e) => handleMetaChange('halaman', e.target.value)}
+                        className="w-16 border border-gray-300 rounded-lg px-2 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 text-center"
+                      />
+                      <span className="text-gray-400 text-sm">dari</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={meta.totalHalaman}
+                        onChange={(e) => handleMetaChange('totalHalaman', e.target.value)}
+                        className="w-16 border border-gray-300 rounded-lg px-2 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 text-center"
+                      />
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-1 font-medium text-gray-700 whitespace-nowrap">No. SIKA</td>
+                  <td className="py-1 px-3 text-gray-400">:</td>
+                  <td className="py-1 pr-10">
+                    <input
+                      type="text"
+                      value={meta.noSIKA}
+                      onChange={(e) => handleMetaChange('noSIKA', e.target.value)}
+                      placeholder="Masukkan No. SIKA"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder-gray-400"
+                    />
+                  </td>
+                  <td />
+                  <td className="py-1 font-medium text-gray-700 whitespace-nowrap">Status</td>
+                  <td className="py-1 px-3 text-gray-400">:</td>
+                  <td className="py-1">
+                    <div className="flex items-center gap-6">
+                      <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                        <input
+                          type="radio"
+                          name="status"
+                          value="baru"
+                          checked={meta.status === 'baru'}
+                          onChange={() => handleMetaChange('status', 'baru')}
+                          className="accent-blue-600"
+                        />
+                        Baru
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                        <input
+                          type="radio"
+                          name="status"
+                          value="revisi"
+                          checked={meta.status === 'revisi'}
+                          onChange={() => handleMetaChange('status', 'revisi')}
+                          className="accent-blue-600"
+                        />
+                        Revisi
+                      </label>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
-          {/* Form */}
-          <div className="px-8 py-6 space-y-5">
+          {/* ── DIVIDER ── */}
+          <div className="mx-8 border-t-2 border-dashed border-gray-200" />
 
-            {/* Kontraktor */}
-            <div className="flex items-center gap-4">
-              <label className="w-48 text-sm text-gray-700 shrink-0 font-medium">
-                Kontraktor
-              </label>
-              <span className="text-gray-400 shrink-0">:</span>
-              <input
-                type="text"
-                placeholder="Masukkan nama kontraktor"
-                value={form.kontraktor}
-                onChange={(e) => handleChange('kontraktor', e.target.value)}
-                className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-            </div>
-
-            {/* Lokasi */}
-            <div className="flex items-center gap-4">
-              <label className="w-48 text-sm text-gray-700 shrink-0 font-medium">
-                Lokasi
-              </label>
-              <span className="text-gray-400 shrink-0">:</span>
-              <input
-                type="text"
-                placeholder="Masukkan lokasi kerja"
-                value={form.lokasi}
-                onChange={(e) => handleChange('lokasi', e.target.value)}
-                className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-            </div>
-
-            {/* Tanggal JSA */}
-            <div className="flex items-center gap-4">
-              <label className="w-48 text-sm text-gray-700 shrink-0 font-medium">
-                Tanggal JSA
-              </label>
-              <span className="text-gray-400 shrink-0">:</span>
-              <input
-                type="date"
-                value={form.tanggalJSA}
-                onChange={(e) => handleChange('tanggalJSA', e.target.value)}
-                className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-            </div>
-
-            {/* Nama JSA */}
-            <div className="flex items-center gap-4">
-              <label className="w-48 text-sm text-gray-700 shrink-0 font-medium">
-                Nama JSA
-              </label>
-              <span className="text-gray-400 shrink-0">:</span>
-              <input
-                type="text"
-                placeholder="Masukkan nama JSA"
-                value={form.namaJSA}
-                onChange={(e) => handleChange('namaJSA', e.target.value)}
-                className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-            </div>
-
-            {/* Dokumen Terkait */}
-            <div className="flex items-start gap-4">
-              <label className="w-48 text-sm text-gray-700 shrink-0 font-medium pt-2">
-                Doc Terkait (Permohonan JSA dan Work Permit)
-              </label>
-              <span className="text-gray-400 shrink-0">:</span>
-              <div className="flex-1 space-y-3">
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-400 transition">
-                  <input
-                    type="file"
-                    id="fileUpload"
-                    multiple
-                    accept=".pdf,application/pdf"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                  <label
-                    htmlFor="fileUpload"
-                    className="flex flex-col items-center gap-2 cursor-pointer"
-                  >
-                    <Upload size={32} className="text-gray-400" />
-                    <span className="text-sm text-gray-500">
-                      Klik untuk browse atau drag & drop file PDF
-                    </span>
-                    <span className="text-xs text-gray-400">Maksimal 10MB per file</span>
-                  </label>
-                </div>
-
-                {files.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium text-gray-700">File terupload ({files.length}):</p>
-                    {files.map((file, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 border border-gray-200"
+          {/* ── MAIN JSA TABLE ── */}
+          <div className="px-8 py-6 overflow-x-auto">
+            <div className="rounded-xl overflow-hidden border border-gray-200">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr style={{ background: '#ffffff' }}>
+            <th className="px-2 py-3 text-center w-8 font-medium text-gray-700 border-r border-gray-200">
+                  No
+                </th>
+                <th className="px-3 py-3 text-center w-[22%] font-semibold text-gray-500 border-r border-gray-200">
+                  Langkah-langkah / Urutan<br />Pekerjaan
+                </th>
+                <th className="px-3 py-3 text-center w-[18%] font-semibold text-gray-500 border-r border-gray-200">
+                  Peralatan / Material yang<br />Digunakan
+                </th>
+                <th className="px-3 py-3 text-center w-[20%] font-semibold text-gray-500 border-r border-gray-200">
+                  Potensi Bahaya
+                </th>
+                <th className="px-3 py-3 text-center w-[9%] font-semibold text-gray-500 border-r border-gray-200">
+                  Tingkat<br />Risiko
+                </th>
+                <th className="px-3 py-3 text-center w-[22%] font-semibold text-gray-500 border-r border-gray-200">
+                  Mitigasi Untuk Menghilangkan atau<br />Mengurangi Bahaya &amp; Resiko
+                </th>
+                <th className="px-3 py-3 text-center w-[10%] font-semibold text-gray-500 border-r border-gray-200">
+                  Penanggung<br />Jawab
+                </th>
+                <th className="px-2 py-3 w-8" />
+              </tr>
+                </thead>
+                <tbody>
+                  {sections.map((sec) => (
+                    <Fragment key={sec.key}>
+                      {/* Section banner */}
+                      <tr
+                        style={{ background: '#eff6ff', borderLeft: '4px solid #2563eb' }}
                       >
-                        <div className="flex items-center gap-2">
-                          <FileText size={16} className="text-blue-500" />
-                          <span className="text-sm text-gray-600">{file.name}</span>
-                          <span className="text-xs text-gray-400">
-                            ({(file.size / 1024).toFixed(2)} KB)
-                          </span>
-                        </div>
-                        <button
-                          onClick={() => removeFile(index)}
-                          className="text-red-500 hover:text-red-700"
+                        <td className="px-2 py-2.5 text-center font-bold text-blue-700 border-r border-blue-100">
+                          {sec.key}
+                        </td>
+                        <td
+                          colSpan={7}
+                          className="px-3 py-2.5 font-bold text-blue-800 tracking-wide text-xs uppercase"
                         >
-                          <X size={16} />
+                          {sec.label}
+                        </td>
+                      </tr>
+
+                      {sec.rows.map((row, rowIdx) => {
+                        const risk = getRiskStyle(row.tingkatRisiko);
+                        const isEven = rowIdx % 2 === 0;
+                        return (
+                          <tr
+                            key={row.id}
+                            className="group divide-x divide-gray-200 transition-colors"
+                            style={{ background: isEven ? '#ffffff' : '#f8fafc' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = '#eff6ff')}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = isEven ? '#ffffff' : '#f8fafc')}
+                          >
+                            <td className="px-2 py-2 text-center font-semibold text-gray-400 border-r border-gray-200 w-8">
+                              {rowIdx + 1}
+                            </td>
+                            <td className="px-2 py-2 border-r border-gray-200">
+                              <input
+                                type="text"
+                                value={row.langkah}
+                                onChange={(e) => updateRow(sec.key, row.id, 'langkah', e.target.value)}
+                                placeholder="Langkah pekerjaan..."
+                                className="w-full outline-none text-xs text-gray-800 placeholder-gray-300 rounded px-2 py-1.5 transition"
+                                style={inputStyle}
+                                onFocus={inputFocus}
+                                onBlur={inputBlur}
+                              />
+                            </td>
+                            <td className="px-2 py-2 border-r border-gray-200">
+                              <input
+                                type="text"
+                                value={row.peralatan}
+                                onChange={(e) => updateRow(sec.key, row.id, 'peralatan', e.target.value)}
+                                placeholder="Peralatan/material..."
+                                className="w-full outline-none text-xs text-gray-800 placeholder-gray-300 rounded px-2 py-1.5 transition"
+                                style={inputStyle}
+                                onFocus={inputFocus}
+                                onBlur={inputBlur}
+                              />
+                            </td>
+                            <td className="px-2 py-2 border-r border-gray-200">
+                              <input
+                                type="text"
+                                value={row.potensiBahaya}
+                                onChange={(e) => updateRow(sec.key, row.id, 'potensiBahaya', e.target.value)}
+                                placeholder="Potensi bahaya..."
+                                className="w-full outline-none text-xs text-gray-800 placeholder-gray-300 rounded px-2 py-1.5 transition"
+                                style={inputStyle}
+                                onFocus={inputFocus}
+                                onBlur={inputBlur}
+                              />
+                            </td>
+                            <td className="px-1.5 py-2 text-center border-r border-gray-200">
+                              <input
+                                type="text"
+                                value={row.tingkatRisiko}
+                                onChange={(e) => updateRow(sec.key, row.id, 'tingkatRisiko', e.target.value)}
+                                placeholder="Risiko"
+                                style={{
+                                  background: risk.bg,
+                                  color: risk.text,
+                                  border: `1.5px solid ${risk.text}60`,
+                                  fontWeight: 600,
+                                  boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+                                }}
+                                className="w-full rounded-full text-xs py-1 px-2 text-center outline-none placeholder-gray-300 transition"
+                              />
+                            </td>
+                            <td className="px-2 py-2 border-r border-gray-200">
+                              <input
+                                type="text"
+                                value={row.mitigasi}
+                                onChange={(e) => updateRow(sec.key, row.id, 'mitigasi', e.target.value)}
+                                placeholder="Mitigasi bahaya..."
+                                className="w-full outline-none text-xs text-gray-800 placeholder-gray-300 rounded px-2 py-1.5 transition"
+                                style={inputStyle}
+                                onFocus={inputFocus}
+                                onBlur={inputBlur}
+                              />
+                            </td>
+                            <td className="px-2 py-2 border-r border-gray-200">
+                              <input
+                                type="text"
+                                value={row.penanggungjawab}
+                                onChange={(e) => updateRow(sec.key, row.id, 'penanggungjawab', e.target.value)}
+                                placeholder="PJ..."
+                                className="w-full outline-none text-xs text-gray-800 placeholder-gray-300 rounded px-2 py-1.5 transition"
+                                style={inputStyle}
+                                onFocus={inputFocus}
+                                onBlur={inputBlur}
+                              />
+                            </td>
+                            <td className="px-1 py-2 text-center">
+                              {sec.rows.length > 1 && (
+                                <button
+                                  onClick={() => removeRow(sec.key, row.id)}
+                                  className="inline-flex items-center justify-center w-5 h-5 rounded-full text-red-400 hover:text-red-600 hover:bg-red-50 transition-all text-sm leading-none"
+                                  title="Hapus baris"
+                                >
+                                  ×
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+
+                      {/* Tambah baris */}
+                      <tr style={{ background: '#ffffff' }}>
+                      <td colSpan={8} className="px-4 py-2 border-t border-dashed border-gray-200">
+                        <button
+                          onClick={() => addRow(sec.key)}
+                          className="text-red-400 hover:text-red-600 text-xs font-semibold transition flex items-center gap-1"
+                        >
+                          <span className="text-base leading-none">+</span> Tambah Baris
                         </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {error && (
-                  <p className="text-red-500 text-xs bg-red-50 rounded-lg px-3 py-2">
-                    {error}
-                  </p>
-                )}
-
-                <p className="text-xs text-gray-400">*Max Size: 10mb per file, format PDF (Opsional)</p>
-              </div>
+                      </td>
+                    </tr>
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
             </div>
-
           </div>
 
-          {/* ─── FOOTER BUTTONS ─── */}
+          {/* ── DIVIDER ── */}
+          <div className="mx-8 border-t-2 border-dashed border-gray-200" />
+
+          {/* ── PPE TABLE ── */}
+          <div className="px-8 py-6">
+            <table className="w-full text-xs border-collapse rounded-lg overflow-hidden">
+              <thead>
+                <tr>
+                  <th
+                    colSpan={8}
+                    style={{ background: '#1e40af', color: 'white' }}
+                    className="px-3 py-3 text-center font-bold tracking-widest uppercase border border-blue-700"
+                  >
+                    Peralatan Pelindung dan Sistem yang Digunakan untuk Melakukan Pekerjaan Ini
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {ppe.map((row, ri) => (
+                  <tr key={ri} style={{ background: ri % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                    {row.map((item, ci) => (
+                      <Fragment key={ci}>
+                        <td
+                          className={`border border-gray-200 px-3 py-2.5 text-gray-700 text-xs font-medium ${item.label === 'Others :' ? 'underline' : ''}`}
+                        >
+                          {item.label}
+                        </td>
+                        <td
+                          className="border border-gray-200 w-10 text-center cursor-pointer select-none transition"
+                          onClick={() => togglePPE(ri, ci)}
+                          title={item.checked ? 'Hapus centang' : 'Centang'}
+                          style={{ background: item.checked ? '#eff6ff' : undefined }}
+                        >
+                          {item.checked ? (
+                            <span style={{ color: '#1d4ed8', fontSize: '16px', fontWeight: 700 }}>✓</span>
+                          ) : (
+                            <span style={{ color: '#cbd5e1', fontSize: '16px' }}>□</span>
+                          )}
+                        </td>
+                      </Fragment>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="text-xs text-gray-400 mt-2 italic">
+              *Berikan tanda ✓ didalam kotak untuk peralatan pelindung dan sistem yang digunakan
+            </p>
+          </div>
+
+          {/* ── FOOTER BUTTONS ── */}
           <div className="flex justify-end gap-3 py-6 px-8 border-t border-gray-100">
             <button
               onClick={handleBack}
@@ -254,7 +600,7 @@ export default function EntryJSAPage() {
               Save and Close
             </button>
             <button
-              onClick={handleNext}
+              onClick={handleSubmit}
               className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition shadow-md shadow-blue-200"
             >
               Next

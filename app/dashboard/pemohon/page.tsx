@@ -199,7 +199,7 @@ export default function DashboardPemohon() {
               <p style={{ fontWeight: 700, color: '#fff', fontSize: '0.9rem', margin: '0 0 14px' }}>
                 Layanan
               </p>
-              {['Job Safety Analysis (JSA)', 'Work Permit', 'Monitoring Aktivitas'].map(item => (
+              {['Job Safety Analysis (JSA)', 'Sistem Kerja (SIKA)', 'Monitoring Aktivitas'].map(item => (
                 <a key={item} href="#" style={{ display: 'block', color: '#bfdbfe', fontSize: '0.82rem', marginBottom: '10px', textDecoration: 'none' }}
                   onMouseEnter={e => (e.currentTarget.style.color = '#fff')}
                   onMouseLeave={e => (e.currentTarget.style.color = '#bfdbfe')}

@@ -52,7 +52,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundImage: "url('/loginopacity.svg')", backgroundSize: 'cover', backgroundPosition: 'center' }}>
       <div
         className="bg-white rounded-2xl shadow-xl overflow-hidden w-full max-w-4xl flex"
         style={{ minHeight: '520px' }}
@@ -76,7 +76,7 @@ export default function LoginPage() {
               Selamat Datang di <span className="text-blue-600">SIKA!</span>
             </h1>
             <p className="text-gray-500 text-sm mb-8 leading-relaxed">
-              Sistem digital untuk pengelolaan JSA, Work Permit, validasi pekerjaan,
+              Sistem digital untuk pengelolaan JSA, SIKA, validasi pekerjaan,
               dan monitoring aktivitas kerja secara terintegrasi
             </p>
 
@@ -146,17 +146,20 @@ export default function LoginPage() {
         </div>
 
         {/* ─── RIGHT PANEL ─── */}
-        <div className="hidden md:block w-80 lg:w-96 relative shrink-0">
-          <div
-            className="absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: "url('/login-bg.svg')" }}
-          />
-          <div className="absolute bottom-0 left-0 right-0 bg-blue-900 bg-opacity-80 p-4">
-            <p className="text-white text-xs leading-relaxed italic font-medium">
-              "SIKA hadir untuk memastikan setiap pekerjaan lapangan berjalan aman, terencana, dan terdokumentasi dengan baik."
+      <div className="hidden md:block w-80 lg:w-96 relative shrink-0">
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: "url('/login-bg.svg')" }}
+        />
+        <div className="absolute inset-0 bg-linear-to-t from-blue-950 via-blue-900/40 to-transparent" />
+        <div className="absolute bottom-0 left-0 right-0 p-6">
+          <div className="border-l-4 border-blue-400 pl-4">
+            <p className="text-white text-xs leading-relaxed italic opacity-90">
+              "Mendukung pengelolaan JSA dan Sistem Kerja Aman demi pekerjaan lapangan yang aman, terencana, dan terdokumentasi."
             </p>
           </div>
         </div>
+      </div>
 
       </div>
     </div>

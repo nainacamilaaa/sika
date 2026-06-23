@@ -7,11 +7,29 @@ interface ProgramData {
   noKontrak: string;
   tanggalKontrak: string;
   satKerjaPemberi: string;
-  picPemberi: string;
-  satKerjaPenanggung: string;
-  picPenanggung: string;
   pelaksanaJenis: string;
   pelaksanaPerusahaan: string;
+  picPemberiList: string[];
+  pimpinanPelaksanaList: string[];
+  satKerjaPenanggung: string;
+  fungsiIA: string;
+  picPenanggungList: string[];
+}
+
+interface JSARow {
+  id: string;
+  langkah: string;
+  peralatan: string;
+  potensiBahaya: string;
+  tingkatRisiko: string;
+  mitigasi: string;
+  penanggungjawab: string;
+}
+
+interface JSASection {
+  key: string;
+  label: string;
+  rows: JSARow[];
 }
 
 interface JSAData {
@@ -21,6 +39,13 @@ interface JSAData {
   tanggalJSA: string;
   namaJSA: string;
   dokumen: string[];
+  // ── Detail JSA (jsa/new) ──
+  judulPekerjaan: string;
+  halaman: string;
+  totalHalaman: string;
+  status: 'baru' | 'revisi';
+  sections: JSASection[];
+  checkedPPE: string[];
 }
 
 interface AktivitasData {

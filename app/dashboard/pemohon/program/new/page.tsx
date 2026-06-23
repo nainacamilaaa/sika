@@ -16,14 +16,14 @@ export default function EntryProgramPage() {
     satKerjaPemberi: '',
     pelaksanaJenis: '',
     pelaksanaPerusahaan: '',
-    picPemberi: '',
-    pimpinanPelaksana: '',
+    picPemberiList: [''],
+    pimpinanPelaksanaList: [''],
     satKerjaPenanggung: '',
     fungsiIA: '',
-    picPenanggung: '',
+    picPenanggungList: [''],
   });
 
-  const handleChange = (field: string, value: string) => {
+  const handleChange = (field: string, value: string | string[]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -35,7 +35,7 @@ export default function EntryProgramPage() {
 
   const handleNext = () => {
     setProgram(form);
-    router.push('/dashboard/pemohon/jsa/new');
+    router.push('/dashboard/pemohon/sika/new');
   };
 
   const opsiLokasi = [
@@ -48,7 +48,7 @@ export default function EntryProgramPage() {
     'Operation West Java Area',
     'Operation East Java Area',
     'Operation Kalimantan Area',
-    'Project Management'
+    'Project Management',
   ];
   const opsiFungsi = [
     'Procurement & Facilities Management',
@@ -63,7 +63,7 @@ export default function EntryProgramPage() {
     'Operation Rokan Area',
     'Operation West Java Area',
     'Operation East Java Area',
-    'Operation Kalimantan Area'
+    'Operation Kalimantan Area',
   ];
   const opsiPIC = ['Test 1', 'Test 2', 'Test 3'];
   const opsiPelaksana = ['Test 1', 'Test 2', 'Test 3'];
@@ -81,40 +81,104 @@ export default function EntryProgramPage() {
     'Operation Rokan Area',
     'Operation West Java Area',
     'Operation East Java Area',
-    'Operation Kalimantan Area'
+    'Operation Kalimantan Area',
   ];
+
+  const renderPICRows = (
+  listKey: 'picPemberiList' | 'pimpinanPelaksanaList' | 'picPenanggungList',
+  list: string[]
+) => (
+  <div className="flex-1 flex flex-col gap-2">
+    {list.map((val, idx) => (
+      <div key={`${listKey}-${idx}`} className="flex gap-2">
+        <select
+          value={val}
+          onChange={(e) => {
+            const updated = [...list];
+            updated[idx] = e.target.value;
+            handleChange(listKey, updated);
+          }}
+          className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+        >
+          <option value="">-- Pilih --</option>
+          {opsiPIC.map((o) => (
+            <option key={o}>{o}</option>
+          ))}
+        </select>
+
+        {idx === 0 ? (
+          <button
+            type="button"
+            onClick={() => handleChange(listKey, [...list, ''])}
+            className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded transition whitespace-nowrap"
+          >
+            Tambah PIC
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => handleChange(listKey, list.filter((_, i) => i !== idx))}
+            className="bg-red-500 hover:bg-red-600 text-white text-sm font-medium px-4 py-2 rounded transition whitespace-nowrap"
+          >
+            Hapus
+          </button>
+        )}
+      </div>
+    ))}
+  </div>
+);
 
   return (
     <div className="min-h-screen bg-gray-100">
 
-      {/* ─── TOP NAVBAR ─── */}
+    {/* ─── TOP NAVBAR ─── */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3" style={{ paddingLeft: '30px' }}>
-          <div className="flex items-center gap-2">
-            <img
-              src="/logosika.svg"
-              alt="SIKA"
-              className="h-7 object-contain"
-            />
-            <span className="font-bold text-gray-800 text-sm tracking-wide">ENTRY DATA</span>
-          </div>
+        <div className="flex items-center gap-2" style={{ paddingLeft: '30px' }}>
+          <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
+          <div className="w-px h-5 bg-gray-300 mx-2" />
+          <span className="text-xs font-bold text-blue-600 uppercase tracking-widest">Entry Data</span>
         </div>
-        <div className="text-sm font-medium flex items-center gap-1">
-          <span className="text-blue-800 cursor-pointer hover:underline">PROGRAM</span>
-          <span className="text-gray-400">&gt;</span>
-          <span className="text-blue-400 cursor-pointer hover:underline">JSA</span>
-          <span className="text-gray-400">&gt;</span>
-          <span className="text-blue-400 cursor-pointer hover:underline">DETAIL JSA</span>
+
+        <div className="flex items-center gap-0">
+          {[
+            { label: 'Program', active: true },
+            { label: 'Pengisian SIKA', active: false },
+            { label: 'Pengisian JSA', active: false },
+            { label: 'Detail Program', active: false },
+          ].map((step, i, arr) => (
+            <div key={step.label} className="flex items-center">
+              <div className="flex items-center gap-2 px-3">
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                  step.active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'
+                }`}>
+                  {i + 1}
+                </div>
+                <span className={`text-xs font-medium ${step.active ? 'text-blue-600' : 'text-gray-400'}`}>
+                  {step.label}
+                </span>
+              </div>
+              {i < arr.length - 1 && (
+                <div className="w-8 h-px bg-gray-200" />
+              )}
+            </div>
+          ))}
         </div>
       </div>
 
       {/* ─── CONTENT ─── */}
       <div className="px-6 py-8">
-        <div className="bg-white rounded border-2 border-blue-400 overflow-hidden">
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
 
           {/* Subheader */}
-          <div className="bg-blue-100 px-6 py-2 border-b border-blue-200">
-            <span className="text-blue-700 font-bold text-sm">ENTRY PROGRAM</span>
+          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between"
+            style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
+            <div>
+              <span className="text-white font-bold text-sm tracking-wide">ENTRY PROGRAM</span>
+              <p className="text-blue-200 text-xs mt-0.5">Isi seluruh kolom dengan lengkap dan benar</p>
+            </div>
+            <span className="text-xs bg-white/20 text-white px-3 py-1 rounded-full font-medium">
+              Program Form
+            </span>
           </div>
 
           {/* Form */}
@@ -122,9 +186,7 @@ export default function EntryProgramPage() {
 
             {/* Lokasi Kerja */}
             <div className="flex items-center gap-4">
-              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
-                Lokasi Kerja
-              </label>
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">Lokasi Kerja</label>
               <span className="text-gray-400 shrink-0">:</span>
               <select
                 value={form.lokasiKerja}
@@ -136,11 +198,9 @@ export default function EntryProgramPage() {
               </select>
             </div>
 
-            {/* Nama Paket Pekerjaan */}
+            {/* Judul Kontrak Kerja */}
             <div className="flex items-center gap-4">
-              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
-                Judul Kontrak Kerja
-              </label>
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">Judul Kontrak Kerja</label>
               <span className="text-gray-400 shrink-0">:</span>
               <input
                 type="text"
@@ -153,18 +213,13 @@ export default function EntryProgramPage() {
 
             {/* No. Kontrak */}
             <div className="flex items-center gap-4">
-              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
-                No. Kontrak
-              </label>
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">No. Kontrak</label>
               <span className="text-gray-400 shrink-0">:</span>
               <input
                 type="text"
                 placeholder="No. Kontrak"
                 value={form.noKontrak}
-                onChange={(e) => {
-                  const value = e.target.value.replace(/\D/g, '').slice(0, 15);
-                  handleChange('noKontrak', value);
-                }}
+                onChange={(e) => handleChange('noKontrak', e.target.value.replace(/\D/g, '').slice(0, 15))}
                 maxLength={15}
                 inputMode="numeric"
                 className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400"
@@ -173,9 +228,7 @@ export default function EntryProgramPage() {
 
             {/* Tanggal Kontrak */}
             <div className="flex items-center gap-4">
-              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
-                Tanggal Kontrak
-              </label>
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">Tanggal Kontrak</label>
               <span className="text-gray-400 shrink-0">:</span>
               <input
                 type="date"
@@ -185,7 +238,7 @@ export default function EntryProgramPage() {
               />
             </div>
 
-            {/* Fungsi Pemberi Kerja */}
+            {/* Fungsi Penanggung Jawab Pekerjaan */}
             <div className="flex items-center gap-4">
               <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
                 Fungsi (Penanggung Jawab Pekerjaan)
@@ -201,11 +254,9 @@ export default function EntryProgramPage() {
               </select>
             </div>
 
-            {/* ── DIPINDAH KE SINI: Perusahaan Pelaksana ── */}
+            {/* Perusahaan Pelaksana */}
             <div className="flex items-center gap-4">
-              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
-                Perusahaan Pelaksana
-              </label>
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">Perusahaan Pelaksana</label>
               <span className="text-gray-400 shrink-0">:</span>
               <div className="flex-1 flex gap-2">
                 <select
@@ -228,45 +279,21 @@ export default function EntryProgramPage() {
             </div>
 
             {/* PA - Pelaksana Pekerjaan */}
-            <div className="flex items-center gap-4">
-              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
+            <div className="flex items-start gap-4">
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium pt-2">
                 PA (Pelaksana Pekerjaan/Performing Authority)
               </label>
-              <span className="text-gray-400 shrink-0">:</span>
-              <div className="flex-1 flex gap-2">
-                <select
-                  value={form.picPemberi}
-                  onChange={(e) => handleChange('picPemberi', e.target.value)}
-                  className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
-                >
-                  <option value="">-- Pilih --</option>
-                  {opsiPIC.map((o) => <option key={o}>{o}</option>)}
-                </select>
-                <button className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded transition whitespace-nowrap">
-                  Tambah PIC
-                </button>
-              </div>
+              <span className="text-gray-400 shrink-0 pt-2">:</span>
+              {renderPICRows('picPemberiList', form.picPemberiList)}
             </div>
 
-            {/* ── BARU: Pimpinan Pelaksana Pekerjaan (PPA) ── */}
-            <div className="flex items-center gap-4">
-              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
+            {/* Pimpinan Pelaksana Pekerjaan (PPA) */}
+            <div className="flex items-start gap-4">
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium pt-2">
                 Pimpinan Pelaksana Pekerjaan (PPA)
               </label>
-              <span className="text-gray-400 shrink-0">:</span>
-              <div className="flex-1 flex gap-2">
-                <select
-                  value={form.pimpinanPelaksana}
-                  onChange={(e) => handleChange('pimpinanPelaksana', e.target.value)}
-                  className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
-                >
-                  <option value="">-- Pilih --</option>
-                  {opsiPIC.map((o) => <option key={o}>{o}</option>)}
-                </select>
-                <button className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded transition whitespace-nowrap">
-                  Tambah PIC
-                </button>
-              </div>
+              <span className="text-gray-400 shrink-0 pt-2">:</span>
+              {renderPICRows('pimpinanPelaksanaList', form.pimpinanPelaksanaList)}
             </div>
 
             {/* Fungsi Penanggung Jawab Aset */}
@@ -285,7 +312,7 @@ export default function EntryProgramPage() {
               </select>
             </div>
 
-            {/* ── BARU: Fungsi IA (Pemberi Izin Aset) ── */}
+            {/* Fungsi IA */}
             <div className="flex items-center gap-4">
               <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
                 Fungsi IA (Pemberi Izin Aset/Asset Holder/Issuing Authority)
@@ -301,25 +328,13 @@ export default function EntryProgramPage() {
               </select>
             </div>
 
-            {/* PIC IA - Pemberi Izin Aset */}
-            <div className="flex items-center gap-4">
-              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
+            {/* PIC IA */}
+            <div className="flex items-start gap-4">
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium pt-2">
                 PIC IA (Pemberi Izin Aset/Asset Holder/Issuing Authority)
               </label>
-              <span className="text-gray-400 shrink-0">:</span>
-              <div className="flex-1 flex gap-2">
-                <select
-                  value={form.picPenanggung}
-                  onChange={(e) => handleChange('picPenanggung', e.target.value)}
-                  className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
-                >
-                  <option value="">-- Pilih --</option>
-                  {opsiPIC.map((o) => <option key={o}>{o}</option>)}
-                </select>
-                <button className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded transition whitespace-nowrap">
-                  Tambah PIC
-                </button>
-              </div>
+              <span className="text-gray-400 shrink-0 pt-2">:</span>
+              {renderPICRows('picPenanggungList', form.picPenanggungList)}
             </div>
 
           </div>
@@ -327,12 +342,14 @@ export default function EntryProgramPage() {
           {/* ─── FOOTER BUTTONS ─── */}
           <div className="flex justify-end gap-3 py-6 px-8 border-t border-gray-100">
             <button
+              type="button"
               onClick={handleSaveClose}
               className="px-6 py-2 rounded-lg bg-green-500 hover:bg-green-600 text-white text-sm font-semibold transition shadow-md shadow-green-200"
             >
               Save and Close
             </button>
             <button
+              type="button"
               onClick={handleNext}
               className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition shadow-md shadow-blue-200"
             >

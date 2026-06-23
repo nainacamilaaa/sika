@@ -36,6 +36,17 @@ export default function SikaNewPage() {
     setPekerjaList((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const handleClearState = () => {
+    setForm({
+      fungsiPerusahaan: '',
+      lokasiInstalasi: '',
+      peralatanNoIdentitas: '',
+      uraianPekerjaan: '',
+      peralatanDigunakan: '',
+    });
+    setPekerjaList(['']);
+  };
+
   const saveToStore = () => {
     setSika({
       fungsiPerusahaan: form.fungsiPerusahaan,
@@ -47,11 +58,6 @@ export default function SikaNewPage() {
     });
   };
 
-  const handleSaveClose = () => {
-    saveToStore();
-    router.push('/dashboard/pemohon/data-management');
-  };
-
   const handleNext = () => {
     saveToStore();
     router.push('/dashboard/pemohon/sika/pemeriksaan');
@@ -61,43 +67,57 @@ export default function SikaNewPage() {
     <div className="min-h-screen bg-gray-100">
 
       {/* ─── TOP NAVBAR ─── */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3" style={{ paddingLeft: '30px' }}>
-          <div className="flex items-center gap-2">
-            <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
-            <span className="font-bold text-gray-800 text-sm tracking-wide">ENTRY DATA</span>
-          </div>
-        </div>
-        <div className="text-sm font-medium flex items-center gap-1">
-          <span className="text-blue-800 font-semibold">JENIS PEKERJAAN</span>
-          <span className="text-gray-400">&gt;</span>
-          <span
-            className="text-blue-400 cursor-pointer hover:underline"
-            onClick={() => router.push('/dashboard/pemohon/sika/pemeriksaan')}
-          >
-            PEMERIKSAAN
-          </span>
-          <span className="text-gray-400">&gt;</span>
-          <span
-            className="text-blue-400 cursor-pointer hover:underline"
-            onClick={() => router.push('/dashboard/pemohon/sika/formulir')}
-          >
-            FORMULIR SIKA
-          </span>
-        </div>
+    <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+      <div className="flex items-center gap-2" style={{ paddingLeft: '30px' }}>
+        <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
+        <div className="w-px h-5 bg-gray-300 mx-2" />
+        <span className="text-xs font-bold text-blue-600 uppercase tracking-widest">SIKA (Sistem Kerja Aman)</span>
       </div>
 
-      {/* ─── CONTENT ─── */}
-      <div className="px-6 py-8">
-        <div className="bg-white rounded border-2 border-blue-400 overflow-hidden">
-
-          {/* Subheader */}
-          <div className="bg-blue-100 px-6 py-2 border-b border-blue-200">
-            <span className="text-blue-700 font-bold text-sm">JENIS PEKERJAAN</span>
+      <div className="flex items-center gap-0">
+        {[
+          { label: 'Program', active: false },
+          { label: 'Pengisian SIKA', active: true },
+          { label: 'Pengisian JSA', active: false },
+          { label: 'Detail Program', active: false },
+        ].map((step, i, arr) => (
+          <div key={step.label} className="flex items-center">
+            <div className="flex items-center gap-2 px-3">
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                step.active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'
+              }`}>
+                {i + 1}
+              </div>
+              <span className={`text-xs font-medium ${step.active ? 'text-blue-600' : 'text-gray-400'}`}>
+                {step.label}
+              </span>
+            </div>
+            {i < arr.length - 1 && (
+              <div className="w-8 h-px bg-gray-200" />
+            )}
           </div>
+        ))}
+      </div>
+    </div>
 
-          {/* Form */}
-          <div className="px-8 py-6 space-y-5">
+          {/* ─── CONTENT ─── */}
+        <div className="px-6 py-8">
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+
+            {/* Subheader */}
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between"
+              style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
+              <div>
+                <span className="text-white font-bold text-sm tracking-wide">JENIS PEKERJAAN</span>
+                <p className="text-blue-200 text-xs mt-0.5">Isi seluruh kolom dengan lengkap dan benar</p>
+              </div>
+              <span className="text-xs bg-white/20 text-white px-3 py-1 rounded-full font-medium">
+                Surat Izin Kerja (SIKA)
+              </span>
+            </div>
+
+            {/* Form */}
+            <div className="px-8 py-6 space-y-5">
 
             <div className="flex items-center gap-4">
               <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">Fungsi / Perusahaan</label>
@@ -187,13 +207,16 @@ export default function SikaNewPage() {
 
           </div>
 
-          {/* ─── FOOTER BUTTONS ─── */}
+     {/* ─── FOOTER BUTTONS ─── */}
           <div className="flex justify-end gap-3 py-6 px-8 border-t border-gray-100">
             <button
-              onClick={handleSaveClose}
-              className="px-6 py-2 rounded-lg bg-green-500 hover:bg-green-600 text-white text-sm font-semibold transition shadow-md shadow-green-200"
+              onClick={() => {
+                handleClearState();
+                router.push('/dashboard/pemohon/program/new');
+              }}
+              className="flex items-center gap-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-medium px-6 py-2 rounded-lg transition shadow-md shadow-red-200"
             >
-              Save and Close
+              Back
             </button>
             <button
               onClick={handleNext}
