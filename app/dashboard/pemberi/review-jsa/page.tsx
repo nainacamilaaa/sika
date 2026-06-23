@@ -128,15 +128,15 @@ export default function ReviewJSAPage() {
                 { label: 'No Kontrak',                     value: program?.noKontrak },
                 { label: 'tanggal Kontrak',                value: program?.tanggalKontrak },
                 { label: 'Satuan Kerja',                   value: program?.satKerjaPemberi },
-                { label: 'Reviewer',                       value: program?.picPemberi },
+                { label: 'Reviewer', value: program?.picPemberiList?.join(', ') },
                 { label: 'Perusahaan',                     value: program?.pelaksanaPerusahaan },
                 { label: '(Penanggung Jawab Aset) Satuan Kerja', value: program?.satKerjaPenanggung },
-                { label: '(Penanggung Jawab Aset) PIC',   value: program?.picPenanggung },
+                { label: '(Penanggung Jawab Aset) PIC', value: program?.picPenanggungList?.join(', ') },
                 { label: 'Pelaksana',                      value: `${program?.pelaksanaPerusahaan || '-'} (${program?.pelaksanaJenis || '-'})` },
               ].map((item) => (
                 <div key={item.label} className="flex gap-3">
-                  <span className="w-52 text-gray-600 flex-shrink-0">{item.label}</span>
-                  <span className="text-gray-400 flex-shrink-0">:</span>
+                  <span className="w-52 text-gray-600 shrink-0">{item.label}</span>
+                  <span className="text-gray-400 shrink-0">:</span>
                   <span className="text-gray-800">{item.value || '-'}</span>
                 </div>
               ))}
@@ -150,8 +150,8 @@ export default function ReviewJSAPage() {
             </div>
             <div className="px-5 py-4 space-y-3 text-sm">
               <div className="flex items-center gap-3">
-                <span className="w-32 text-gray-600 flex-shrink-0">JSA No.</span>
-                <span className="text-gray-400 flex-shrink-0">:</span>
+                <span className="w-32 text-gray-600 shrink-0">JSA No.</span>
+                <span className="text-gray-400 shrink-0">:</span>
                 <span className="text-gray-800 flex-1">{jsa?.jsaNo || 'JSA/2024/001'}</span>
                 <button className="flex items-center gap-1 bg-green-500 hover:bg-green-600 text-white text-xs font-medium px-3 py-1.5 rounded transition">
                   <Pencil size={12} /> Edit
@@ -163,14 +163,14 @@ export default function ReviewJSAPage() {
                 { label: 'Nama Pekerjaan', value: jsa?.namaJSA },
               ].map((item) => (
                 <div key={item.label} className="flex gap-3">
-                  <span className="w-32 text-gray-600 flex-shrink-0">{item.label}</span>
-                  <span className="text-gray-400 flex-shrink-0">:</span>
+                  <span className="w-32 text-gray-600 shrink-0">{item.label}</span>
+                  <span className="text-gray-400 shrink-0">:</span>
                   <span className="text-gray-800">{item.value || '-'}</span>
                 </div>
               ))}
               <div className="flex gap-3">
-                <span className="w-32 text-gray-600 flex-shrink-0">Lampiran</span>
-                <span className="text-gray-400 flex-shrink-0">:</span>
+                <span className="w-32 text-gray-600 shrink-0">Lampiran</span>
+                <span className="text-gray-400 shrink-0">:</span>
                 <div className="flex-1 space-y-2">
                   {jsa?.dokumen?.length ? (
                     jsa.dokumen.map((doc, i) => (
