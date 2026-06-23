@@ -49,13 +49,13 @@ export default function ApprovalJSAPage() {
   const detailItems = [
     { label: 'Nama Paket Pekerjaan (Kontrak)',       value: program?.namaPaket },
     { label: 'Tanggal Kontrak',                      value: program?.tanggalKontrak },
-    { label: 'Reviewer',                             value: program?.picPemberi },
+    { label: 'Reviewer', value: program?.picPemberiList?.join(', ') }, gi
     { label: 'Satuan Kerja (Penanggung Jawab Aset)', value: program?.satKerjaPenanggung },
     { label: 'Pelaksana',                            value: `${program?.pelaksanaPerusahaan || '-'} (${program?.pelaksanaJenis || '-'})` },
     { label: 'No Kontrak',                           value: program?.noKontrak },
     { label: 'Satuan Kerja',                         value: program?.satKerjaPemberi },
     { label: 'Perusahaan (Penanggung Jawab Aset)',   value: program?.pelaksanaPerusahaan },
-    { label: 'PIC (Penanggung Jawab Aset)',          value: program?.picPenanggung },
+   { label: 'PIC (Penanggung Jawab Aset)', value: program?.picPenanggungList?.join(', ') }
   ];
 
   return (
