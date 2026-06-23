@@ -124,10 +124,10 @@ export default function DataManagementJSAPage() {
     { label: 'No Kontrak',                            value: program?.noKontrak },
     { label: 'Tanggal Kontrak',                       value: program?.tanggalKontrak },
     { label: 'Satuan Kerja',                          value: program?.satKerjaPemberi },
-    { label: 'Reviewer',                              value: program?.picPemberi },
+    { label: 'Reviewer', value: program?.picPemberiList?.join(', ') },
     { label: 'Perusahaan (Penanggung Jawab Aset)',    value: program?.pelaksanaPerusahaan },
     { label: 'Satuan Kerja (Penanggung Jawab Aset)',  value: program?.satKerjaPenanggung },
-    { label: 'PIC (Penanggung Jawab Aset)',           value: program?.picPenanggung },
+    { label: 'PIC (Penanggung Jawab Aset)', value: program?.picPenanggungList?.join(', ') },
     { label: 'Pelaksana',                             value: program?.pelaksanaPerusahaan
         ? `${program.pelaksanaPerusahaan} (${program.pelaksanaJenis ?? 'Eksternal'})`
         : '-' },
