@@ -5,31 +5,6 @@ import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import { useProgramStore } from '@/store/programStore';
 
-// Helper untuk menyimpan dan mengambil data dari sessionStorage
-const STORAGE_KEY = 'sika_pemeriksaan_state';
-
-const loadState = () => {
-  if (typeof window === 'undefined') return null;
-  try {
-    const saved = sessionStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      return JSON.parse(saved);
-    }
-  } catch (e) {
-    console.error('Failed to load state:', e);
-  }
-  return null;
-};
-
-const saveState = (data: any) => {
-  if (typeof window === 'undefined') return;
-  try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch (e) {
-    console.error('Failed to save state:', e);
-  }
-};
-
 const CheckItem = ({
   label, checked, onChange,
 }: { label: string; checked: boolean; onChange: () => void }) => (
@@ -46,11 +21,16 @@ const CheckItem = ({
 
 export default function SikaPemeriksaanPage() {
   const router = useRouter();
-  const { filledSertifikat, markSertifikatFilled, unmarkSertifikat } = useProgramStore();
+  const { program, sika, setSikaPemeriksaan, filledSertifikat } = useProgramStore();
+
+  useEffect(() => {
+    if (!program) router.replace('/dashboard/pemohon/program/new');
+    else if (!sika) router.replace('/dashboard/pemohon/sika/new');
+  }, [program, sika]);
 
   const isolasiCol1 = ['Electrical Circuits', 'Gas Valve', 'Water Valves'];
   const isolasiCol2 = ['Air Instrument Valves', 'Mekanik', 'Pneumatic/Hydraulic'];
-  
+
   const lampiranCol1 = ['JSA', 'TKO, TKI, TKPA', 'P&ID, Underground Maps'];
   const lampiranCol2 = ['Koordinator PLN', 'Koordinator Telcom', 'Koordinator PDAM'];
   const lampiranCol3 = ['Koordinator BPJN', 'BA Sosialisasi', 'Perizinan Lahan'];
@@ -101,9 +81,6 @@ export default function SikaPemeriksaanPage() {
     'Memenuhi persyaratan sertifikat kerja',
   ];
 
-  const [showModal, setShowModal] = useState(false);
-
-  // Daftar sertifikat dengan mapping ke halaman
   const sertifikatCol1 = [
     'Sertifikat Kerja Panas (SKP)',
     'Sertifikat Kerja Dingin (SKD)',
@@ -117,86 +94,8 @@ export default function SikaPemeriksaanPage() {
     'Sertifikat Kerja Di Ketinggian (SKK)',
     'Sertifikat Kerja Pengambilan Fotografi (SKPF)',
   ];
-
   const allSertifikat = [...sertifikatCol1, ...sertifikatCol2];
 
-  // State yang akan disimpan di sessionStorage
-  const [isolasi, setIsolasi] = useState<string[]>(() => {
-    const saved = loadState();
-    return saved?.isolasi || [];
-  });
-
-  const [lampiran, setLampiran] = useState<string[]>(() => {
-    const saved = loadState();
-    return saved?.lampiran || [];
-  });
-
-  const [identifikasi, setIdentifikasi] = useState<string[]>(() => {
-    const saved = loadState();
-    return saved?.identifikasi || [];
-  });
-
-  const [identifikasiTambahan, setIdentifikasiTambahan] = useState(() => {
-    const saved = loadState();
-    return saved?.identifikasiTambahan || '';
-  });
-
-  const [pengendalian, setPengendalian] = useState<string[]>(() => {
-    const saved = loadState();
-    return saved?.pengendalian || [];
-  });
-
-  const [permintaanTambahan, setPermintaanTambahan] = useState(() => {
-    const saved = loadState();
-    return saved?.permintaanTambahan || '';
-  });
-
-  const [sertifikat, setSertifikat] = useState<string[]>(() => {
-    const saved = loadState();
-    return saved?.sertifikat || [];
-  });
-
-  const [sifatPekerjaan, setSifatPekerjaan] = useState(() => {
-    const saved = loadState();
-    return saved?.sifatPekerjaan || '';
-  });
-
-  const sifatOptions = ['Normal', 'Proyek', 'T/A', 'Emergency'];
-
-  // Simpan state ke sessionStorage setiap kali berubah
-  useEffect(() => {
-    const state = {
-      isolasi,
-      lampiran,
-      identifikasi,
-      identifikasiTambahan,
-      pengendalian,
-      permintaanTambahan,
-      sertifikat,
-      sifatPekerjaan,
-    };
-    saveState(state);
-  }, [
-    isolasi,
-    lampiran,
-    identifikasi,
-    identifikasiTambahan,
-    pengendalian,
-    permintaanTambahan,
-    sertifikat,
-    sifatPekerjaan,
-  ]);
-
-  // Sinkronkan sertifikat yang sudah terisi dari store
-  useEffect(() => {
-    const filled = allSertifikat.filter(item => filledSertifikat.includes(item));
-    setSertifikat(prev => {
-      const combined = [...new Set([...prev, ...filled])];
-      return combined;
-    });
-  }, [filledSertifikat]);
-
-  // Mapping sertifikat ke halaman
   const sertifikatRoutes: Record<string, string> = {
     'Sertifikat Kerja Panas (SKP)': '/dashboard/pemohon/sika/sertifikat/skp',
     'Sertifikat Kerja Dingin (SKD)': '/dashboard/pemohon/sika/sertifikat/skd',
@@ -209,29 +108,37 @@ export default function SikaPemeriksaanPage() {
     'Sertifikat Kerja Pengambilan Fotografi (SKPF)': '/dashboard/pemohon/sika/sertifikat/skpf',
   };
 
-  const toggleSertifikat = (val: string) => {
-    // Jika sudah terisi di store, tidak bisa di-uncheck
-    if (filledSertifikat.includes(val)) {
-      const route = sertifikatRoutes[val];
-      if (route) {
-        router.push(route);
-      }
-      return;
-    }
+  const sifatOptions = ['Normal', 'Proyek', 'T/A', 'Emergency'];
 
-    // Jika belum terisi, toggle normal
-    setSertifikat((prev) => {
-      const newList = prev.includes(val) ? prev.filter((v) => v !== val) : [...prev, val];
-      return newList;
-    });
+  const [showModal, setShowModal] = useState(false);
 
-    // Redirect ke halaman sertifikat saat dicentang
-    if (!sertifikat.includes(val)) {
-      const route = sertifikatRoutes[val];
-      if (route) {
-        router.push(route);
-      }
-    }
+  const [isolasi, setIsolasi] = useState<string[]>(sika?.isolasi ?? []);
+  const [lampiran, setLampiran] = useState<string[]>(sika?.lampiran ?? []);
+  const [identifikasi, setIdentifikasi] = useState<string[]>(sika?.identifikasi ?? []);
+  const [identifikasiTambahan, setIdentifikasiTambahan] = useState(sika?.identifikasiTambahan ?? '');
+  const [pengendalian, setPengendalian] = useState<string[]>(sika?.pengendalian ?? []);
+  const [permintaanTambahan, setPermintaanTambahan] = useState(sika?.permintaanTambahan ?? '');
+  const [sertifikat, setSertifikat] = useState<string[]>(sika?.sertifikat ?? []);
+  const [sifatPekerjaan, setSifatPekerjaan] = useState(sika?.sifatPekerjaan ?? '');
+
+  useEffect(() => {
+    const filled = allSertifikat.filter((item) => filledSertifikat.includes(item));
+    setSertifikat((prev) => [...new Set([...prev, ...filled])]);
+  }, [filledSertifikat]);
+
+  const buildPemeriksaan = (overrideSertifikat?: string[]) => ({
+    isolasi,
+    lampiran,
+    identifikasi,
+    identifikasiTambahan,
+    pengendalian,
+    permintaanTambahan,
+    sertifikat: overrideSertifikat ?? sertifikat,
+    sifatPekerjaan,
+  });
+
+  const saveToStore = (overrideSertifikat?: string[]) => {
+    setSikaPemeriksaan(buildPemeriksaan(overrideSertifikat));
   };
 
   const toggle = (list: string[], setList: (v: string[]) => void, val: string) => {
@@ -239,32 +146,30 @@ export default function SikaPemeriksaanPage() {
     setList(list.includes(val) ? list.filter((v) => v !== val) : [...list, val]);
   };
 
-  const handleSimpan = () => {
-    setShowModal(false);
-    router.push('/dashboard/pemohon/jsa/new');
+  const toggleSertifikat = (val: string) => {
+    if (filledSertifikat.includes(val)) {
+      saveToStore();
+      router.push(sertifikatRoutes[val]);
+      return;
+    }
+
+    const isCurrentlyChecked = sertifikat.includes(val);
+    const newSertifikat = isCurrentlyChecked
+      ? sertifikat.filter((v) => v !== val)
+      : [...sertifikat, val];
+
+    setSertifikat(newSertifikat);
+
+    if (!isCurrentlyChecked) {
+      saveToStore(newSertifikat);
+      router.push(sertifikatRoutes[val]);
+    }
   };
 
-  // Fungsi saveToStore untuk menyimpan data ke store
-  const saveToStore = () => {
-    // Ambil fungsi dari store jika ada
-    // const { setPemeriksaan } = useProgramStore();
-    
-    const pemeriksaanData = {
-      isolasi,
-      lampiran,
-      identifikasi,
-      identifikasiTambahan,
-      pengendalian,
-      permintaanTambahan,
-      sertifikat,
-      sifatPekerjaan,
-    };
-    
-    // Simpan ke store - sesuaikan dengan store Anda
-    // setPemeriksaan(pemeriksaanData);
-    
-    // Data sudah otomatis tersimpan di sessionStorage via useEffect
-    console.log('Data pemeriksaan saved:', pemeriksaanData);
+  const handleSimpan = () => {
+    saveToStore();
+    setShowModal(false);
+    router.push('/dashboard/pemohon/jsa/new');
   };
 
   const handleSaveClose = () => {
@@ -272,61 +177,53 @@ export default function SikaPemeriksaanPage() {
     router.push('/dashboard/pemohon');
   };
 
-  const handleClearState = () => {
-    sessionStorage.removeItem(STORAGE_KEY);
-  };
-
   return (
     <div className="min-h-screen bg-gray-100">
-
-      {/* ─── TOP NAVBAR ─── */}
-    <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-      <div className="flex items-center gap-2" style={{ paddingLeft: '30px' }}>
-        <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
-        <div className="w-px h-5 bg-gray-300 mx-2" />
-        <span className="text-xs font-bold text-blue-600 uppercase tracking-widest">SIKA (Sistem Kerja Aman)</span>
-      </div>
-
-      <div className="flex items-center gap-0">
-        {[
-          { label: 'Program', active: false },
-          { label: 'Pengisian SIKA', active: true },
-          { label: 'Pengisian JSA', active: false },
-          { label: 'Detail Program', active: false },
-        ].map((step, i, arr) => (
-          <div key={step.label} className="flex items-center">
-            <div className="flex items-center gap-2 px-3">
-              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                step.active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'
-              }`}>
-                {i + 1}
-              </div>
-              <span className={`text-xs font-medium ${step.active ? 'text-blue-600' : 'text-gray-400'}`}>
-                {step.label}
-              </span>
-            </div>
-            {i < arr.length - 1 && (
-              <div className="w-8 h-px bg-gray-200" />
-            )}
+      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
+          <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
+          <div className="w-px h-10 bg-gray-200" />
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm font-bold text-gray-800">SIKA</span>
+            <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
+              Surat Izin Kerja Aman
+            </span>
           </div>
-        ))}
+        </div>
+
+        <div className="flex items-center gap-0">
+          {[
+            { label: 'Program', active: false },
+            { label: 'Pengisian SIKA', active: true },
+            { label: 'Pengisian JSA', active: false },
+            { label: 'Detail Program', active: false },
+          ].map((step, i, arr) => (
+            <div key={step.label} className="flex items-center">
+              <div className="flex items-center gap-2 px-3">
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                  step.active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'
+                }`}>
+                  {i + 1}
+                </div>
+                <span className={`text-xs font-medium ${step.active ? 'text-blue-600' : 'text-gray-400'}`}>
+                  {step.label}
+                </span>
+              </div>
+              {i < arr.length - 1 && <div className="w-8 h-px bg-gray-200" />}
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
-    
+
       <div className="px-6 py-6 space-y-4">
 
-        {/* ROW 1: ISOLASI + LAMPIRAN */}
         <div className="grid grid-cols-2 gap-4">
-
-          {/* ISOLASI PERALATAN */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between"
-            style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
-            <div>
+            <div className="px-5 py-3 border-b border-gray-100"
+              style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
               <span className="text-white font-bold text-xs tracking-wide">ISOLASI PERALATAN</span>
               <p className="text-blue-200 text-[10px] mt-0.5">Pilih isolasi yang diterapkan</p>
             </div>
-          </div>
             <div className="px-6 py-5">
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 48px' }}>
                 {[...isolasiCol1, ...isolasiCol2].map((opt) => (
@@ -336,15 +233,12 @@ export default function SikaPemeriksaanPage() {
             </div>
           </div>
 
-          {/* LAMPIRAN MANDATORY */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between"
-            style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
-            <div>
+            <div className="px-5 py-3 border-b border-gray-100"
+              style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
               <span className="text-white font-bold text-xs tracking-wide">LAMPIRAN (MANDATORY)</span>
               <p className="text-blue-200 text-[10px] mt-0.5">Lampiran wajib dilampirkan</p>
             </div>
-          </div>
             <div className="px-6 py-5">
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px 32px' }}>
                 {[...lampiranCol1, ...lampiranCol2, ...lampiranCol3].map((opt) => (
@@ -355,74 +249,57 @@ export default function SikaPemeriksaanPage() {
           </div>
         </div>
 
-        {/* IDENTIFIKASI BAHAYA */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between"
-          style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
-          <div>
+          <div className="px-5 py-3 border-b border-gray-100"
+            style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
             <span className="text-white font-bold text-xs tracking-wide">IDENTIFIKASI BAHAYA</span>
             <p className="text-blue-200 text-[10px] mt-0.5">Centang semua bahaya yang relevan</p>
           </div>
-        </div>
           <div className="px-6 py-5">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px 40px' }}>
-              {identifikasiCol1.map((item) => (
-                <CheckItem key={item} label={item} checked={identifikasi.includes(item)} onChange={() => toggle(identifikasi, setIdentifikasi, item)} />
-              ))}
-              {identifikasiCol2.map((item) => (
-                <CheckItem key={item} label={item} checked={identifikasi.includes(item)} onChange={() => toggle(identifikasi, setIdentifikasi, item)} />
-              ))}
-              {identifikasiCol3.map((item) => (
-                <CheckItem key={item} label={item} checked={identifikasi.includes(item)} onChange={() => toggle(identifikasi, setIdentifikasi, item)} />
-              ))}
-              {identifikasiCol4.map((item) => (
+              {[...identifikasiCol1, ...identifikasiCol2, ...identifikasiCol3, ...identifikasiCol4].map((item) => (
                 <CheckItem key={item} label={item} checked={identifikasi.includes(item)} onChange={() => toggle(identifikasi, setIdentifikasi, item)} />
               ))}
             </div>
             <div className="mt-4">
               <label className="text-xs text-gray-600 mb-1 block">Identifikasi Tambahan:</label>
-              <input type="text" value={identifikasiTambahan} onChange={(e) => setIdentifikasiTambahan(e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400" />
+              <input
+                type="text"
+                value={identifikasiTambahan}
+                onChange={(e) => setIdentifikasiTambahan(e.target.value)}
+                className="w-full border border-gray-300 rounded px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
             </div>
           </div>
         </div>
 
-        {/* PENGENDALIAN BAHAYA */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between"
-          style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
-          <div>
+          <div className="px-5 py-3 border-b border-gray-100"
+            style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
             <span className="text-white font-bold text-xs tracking-wide">PENGENDALIAN BAHAYA</span>
             <p className="text-blue-200 text-[10px] mt-0.5">Pilih pengendalian yang akan diterapkan</p>
           </div>
-        </div>
           <div className="px-6 py-5">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px 40px' }}>
-              {pengendalianCol1.map((item) => (
-                <CheckItem key={item} label={item} checked={pengendalian.includes(item)} onChange={() => toggle(pengendalian, setPengendalian, item)} />
-              ))}
-              {pengendalianCol2.map((item) => (
-                <CheckItem key={item} label={item} checked={pengendalian.includes(item)} onChange={() => toggle(pengendalian, setPengendalian, item)} />
-              ))}
-              {pengendalianCol3.map((item) => (
+              {[...pengendalianCol1, ...pengendalianCol2, ...pengendalianCol3].map((item) => (
                 <CheckItem key={item} label={item} checked={pengendalian.includes(item)} onChange={() => toggle(pengendalian, setPengendalian, item)} />
               ))}
             </div>
             <div className="mt-4">
               <label className="text-xs text-gray-600 mb-1 block">Permintaan Tambahan:</label>
-              <input type="text" value={permintaanTambahan} onChange={(e) => setPermintaanTambahan(e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400" />
+              <input
+                type="text"
+                value={permintaanTambahan}
+                onChange={(e) => setPermintaanTambahan(e.target.value)}
+                className="w-full border border-gray-300 rounded px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
             </div>
           </div>
         </div>
 
-        {/* FOOTER BUTTONS */}
         <div className="flex justify-end gap-3 py-2">
           <button
-            onClick={() => {
-              handleClearState();
-              router.push('/dashboard/pemohon/sika/new');
-            }}
+            onClick={() => router.push('/dashboard/pemohon/sika/new')}
             className="flex items-center gap-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-medium px-6 py-2 rounded-lg transition shadow-md shadow-red-200"
           >
             Back
@@ -434,7 +311,10 @@ export default function SikaPemeriksaanPage() {
             Save and Close
           </button>
           <button
-            onClick={() => setShowModal(true)}
+            onClick={() => {
+              saveToStore();
+              setShowModal(true);
+            }}
             className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition shadow-md shadow-blue-200"
           >
             Next
@@ -442,20 +322,22 @@ export default function SikaPemeriksaanPage() {
         </div>
       </div>
 
-      {/* MODAL */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl w-180 max-w-[95vw] overflow-hidden">
             <div className="px-6 py-4 flex items-center justify-between border-b border-gray-100"
-            style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
-            <div>
-              <p className="text-white font-bold text-base tracking-wide">Formulir SIKA</p>
-              <p className="text-blue-200 text-xs">Surat Izin Kerja Aman</p>
+              style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
+              <div>
+                <p className="text-white font-bold text-base tracking-wide">Formulir SIKA</p>
+                <p className="text-blue-200 text-xs">Surat Izin Kerja Aman</p>
+              </div>
+              <button
+                onClick={() => setShowModal(false)}
+                className="w-8 h-8 hover:bg-white/20 rounded-full flex items-center justify-center transition"
+              >
+                <X size={16} className="text-white" />
+              </button>
             </div>
-            <button onClick={() => setShowModal(false)} className="w-8 h-8 hover:bg-white/20 rounded-full flex items-center justify-center transition">
-              <X size={16} className="text-white" />
-            </button>
-          </div>
 
             <div className="px-6 py-5 space-y-6 max-h-[75vh] overflow-y-auto">
               <div className="grid grid-cols-2 gap-3">
@@ -465,6 +347,7 @@ export default function SikaPemeriksaanPage() {
                   return (
                     <label
                       key={item}
+                      onClick={() => toggleSertifikat(item)}
                       className={`flex items-center gap-3 cursor-pointer rounded-xl px-4 py-3 transition-all border ${
                         isFilled
                           ? 'bg-green-50 border-green-200 cursor-default'
@@ -482,17 +365,10 @@ export default function SikaPemeriksaanPage() {
                       }`}>
                         {(isChecked || isFilled) && (
                           <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
-                            <path d="M1 3.5L3.5 6L8 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                            <path d="M1 3.5L3.5 6L8 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
                         )}
                       </div>
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => toggleSertifikat(item)}
-                        disabled={isFilled}
-                        className="hidden"
-                      />
                       <span className={`text-xs font-medium leading-tight flex-1 ${
                         isFilled ? 'text-green-700' : isChecked ? 'text-blue-700' : 'text-gray-600'
                       }`}>

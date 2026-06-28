@@ -228,7 +228,7 @@ export default function ReviewWorkPermitPJAPage() {
               ].map(([label, value]) => (
                 <div key={label} className="flex items-center gap-4">
                   <label className="w-40 text-sm text-gray-700 shrink-0">{label}</label>
-                  <span className="text-gray-400 flex-shrink-0">:</span>
+                  <span className="text-gray-400 shrink-0">:</span>
                   <div className="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm text-gray-700 bg-gray-50">
                     {value || '-'}
                   </div>

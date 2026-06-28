@@ -39,7 +39,6 @@ interface JSAData {
   tanggalJSA: string;
   namaJSA: string;
   dokumen: string[];
-  // ── Detail JSA (jsa/new) ──
   judulPekerjaan: string;
   halaman: string;
   totalHalaman: string;
@@ -87,14 +86,29 @@ interface RTLData {
   tingkatResikoSetelah: string;
 }
 
-interface SikaData {
+interface SikaBasicData {
   fungsiPerusahaan: string;
   lokasiInstalasi: string;
   peralatanNoIdentitas: string;
   uraianPekerjaan: string;
   peralatanDigunakan: string;
   pekerjaList: string[];
+  noSIKA: string;
+  tanggalSIKA: string;
 }
+
+interface SikaPemeriksaanData {
+  isolasi: string[];
+  lampiran: string[];
+  identifikasi: string[];
+  identifikasiTambahan: string;
+  pengendalian: string[];
+  permintaanTambahan: string;
+  sertifikat: string[];
+  sifatPekerjaan: string;
+}
+
+type SikaData = SikaBasicData & SikaPemeriksaanData;
 
 interface WorkPermitData {
   no: number;
@@ -108,6 +122,28 @@ interface WorkPermitData {
   safetyChecklist: Record<string, boolean>;
 }
 
+type JSAStatus = 'draft' | 'request_review' | 'request_approval' | 'approved' | 'rejected';
+type SIKAStatus = 'draft' | 'request' | 'approved' | 'rejected';
+
+const defaultSika: SikaData = {
+  fungsiPerusahaan: '',
+  lokasiInstalasi: '',
+  peralatanNoIdentitas: '',
+  uraianPekerjaan: '',
+  peralatanDigunakan: '',
+  pekerjaList: [],
+  noSIKA: '',
+  tanggalSIKA: '',
+  isolasi: [],
+  lampiran: [],
+  identifikasi: [],
+  identifikasiTambahan: '',
+  pengendalian: [],
+  permintaanTambahan: '',
+  sertifikat: [],
+  sifatPekerjaan: '',
+};
+
 interface ProgramStore {
   program: ProgramData | null;
   jsa: JSAData | null;
@@ -115,27 +151,32 @@ interface ProgramStore {
   aktivitasList: AktivitasData[];
   pendingRTL: PendingRTL | null;
   rtlList: RTLData[];
-  jsaStatus: 'draft' | 'request_review' | 'request_approval' | 'approved' | null;
+  jsaStatus: JSAStatus;
+  sikaStatus: SIKAStatus;
+  alasanTolakJSA: string | null;
+  alasanTolakSIKA: string | null;
   approveDate: string | null;
   savedWPs: string[];
   workPermitList: WorkPermitData[];
-  // ── Sertifikat yang sudah diisi ──
   filledSertifikat: string[];
 
   setProgram: (data: ProgramData) => void;
   setJSA: (data: JSAData) => void;
   setSika: (data: SikaData) => void;
+  setSikaBasic: (data: SikaBasicData) => void;
+  setSikaPemeriksaan: (data: SikaPemeriksaanData) => void;
   addAktivitas: (data: Omit<AktivitasData, 'no'>) => void;
   removeAktivitas: (no: number) => void;
   setPendingRTL: (data: PendingRTL) => void;
   saveRTL: (data: RTLData) => void;
-  setJsaStatus: (status: 'draft' | 'request_review' | 'request_approval' | 'approved') => void;
+  setJsaStatus: (status: JSAStatus) => void;
+  setSikaStatus: (status: SIKAStatus) => void;
+  setAlasanTolak: (type: 'jsa' | 'sika', alasan: string) => void;
   setApproveDate: (date: string) => void;
   saveWPs: (wps: string[]) => void;
   addWorkPermit: (data: Omit<WorkPermitData, 'no'>) => void;
   updateWorkPermitStatus: (noWP: string, status: WorkPermitData['status']) => void;
   removeWorkPermit: (no: number) => void;
-  // ── Actions sertifikat ──
   markSertifikatFilled: (nama: string) => void;
   unmarkSertifikat: (nama: string) => void;
   reset: () => void;
@@ -150,15 +191,30 @@ export const useProgramStore = create<ProgramStore>()(
       aktivitasList: [],
       pendingRTL: null,
       rtlList: [],
-      jsaStatus: null,
+      jsaStatus: 'draft',
+      sikaStatus: 'draft',
+      alasanTolakJSA: null,
+      alasanTolakSIKA: null,
       approveDate: null,
       savedWPs: [],
       workPermitList: [],
       filledSertifikat: [],
 
       setProgram: (data) => set({ program: data }),
+
       setJSA: (data) => set({ jsa: data }),
+
       setSika: (data) => set({ sika: data }),
+
+      setSikaBasic: (data) =>
+        set((state) => ({
+          sika: { ...(state.sika ?? defaultSika), ...data },
+        })),
+
+      setSikaPemeriksaan: (data) =>
+        set((state) => ({
+          sika: { ...(state.sika ?? defaultSika), ...data },
+        })),
 
       addAktivitas: (data) =>
         set((state) => ({
@@ -187,6 +243,11 @@ export const useProgramStore = create<ProgramStore>()(
         })),
 
       setJsaStatus: (status) => set({ jsaStatus: status }),
+
+      setSikaStatus: (status) => set({ sikaStatus: status }),
+
+      setAlasanTolak: (type, alasan) =>
+        set(type === 'jsa' ? { alasanTolakJSA: alasan } : { alasanTolakSIKA: alasan }),
 
       setApproveDate: (date) => set({ approveDate: date }),
 
@@ -234,7 +295,10 @@ export const useProgramStore = create<ProgramStore>()(
           aktivitasList: [],
           pendingRTL: null,
           rtlList: [],
-          jsaStatus: null,
+          jsaStatus: 'draft',
+          sikaStatus: 'draft',
+          alasanTolakJSA: null,
+          alasanTolakSIKA: null,
           approveDate: null,
           savedWPs: [],
           workPermitList: [],
@@ -244,3 +308,19 @@ export const useProgramStore = create<ProgramStore>()(
     { name: 'sika-program' }
   )
 );
+
+export type {
+  ProgramData,
+  JSAData,
+  JSARow,
+  JSASection,
+  SikaData,
+  SikaBasicData,
+  SikaPemeriksaanData,
+  AktivitasData,
+  PendingRTL,
+  RTLData,
+  WorkPermitData,
+  JSAStatus,
+  SIKAStatus,
+};

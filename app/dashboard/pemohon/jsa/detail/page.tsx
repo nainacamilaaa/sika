@@ -1,39 +1,11 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Pencil, ChevronLeft } from 'lucide-react';
 import { useProgramStore } from '@/store/programStore';
 import jsPDF from 'jspdf';
 import { toPng } from 'html-to-image';
-
-// ─── Sessionstorage state dari halaman Pemeriksaan SIKA ───────────────────────
-
-const PEMERIKSAAN_STORAGE_KEY = 'sika_pemeriksaan_state';
-
-interface PemeriksaanState {
-  isolasi: string[];
-  lampiran: string[];
-  identifikasi: string[];
-  identifikasiTambahan: string;
-  pengendalian: string[];
-  permintaanTambahan: string;
-  sertifikat: string[];
-  sifatPekerjaan: string;
-}
-
-const loadPemeriksaanState = (): PemeriksaanState | null => {
-  if (typeof window === 'undefined') return null;
-  try {
-    const saved = sessionStorage.getItem(PEMERIKSAAN_STORAGE_KEY);
-    if (saved) return JSON.parse(saved);
-  } catch (e) {
-    console.error('Failed to load pemeriksaan state:', e);
-  }
-  return null;
-};
-
-// ─── Komponen kecil untuk daftar chip ──────────────────────────────────────────
 
 function ChipGroup({ label, items }: { label: string; items?: string[] }) {
   return (
@@ -54,19 +26,17 @@ function ChipGroup({ label, items }: { label: string; items?: string[] }) {
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
-
-export default function DetailJSAPage() {
+export default function DetailProgramPage() {
   const router = useRouter();
-  const { program, jsa, sika } = useProgramStore();
+  const { program, jsa, sika, setJsaStatus } = useProgramStore();
   const contentRef = useRef<HTMLDivElement>(null);
-
   const [isExporting, setIsExporting] = useState(false);
-  const [pemeriksaan, setPemeriksaan] = useState<PemeriksaanState | null>(null);
 
   useEffect(() => {
-    setPemeriksaan(loadPemeriksaanState());
-  }, []);
+    if (!program) router.replace('/dashboard/pemohon/program/new');
+    else if (!sika) router.replace('/dashboard/pemohon/sika/new');
+    else if (!jsa) router.replace('/dashboard/pemohon/jsa/new');
+  }, [program, sika, jsa]);
 
   const handleRequestReview = () => {
     const hasLangkah = jsa?.sections?.some((sec) =>
@@ -76,6 +46,7 @@ export default function DetailJSAPage() {
       alert('Lengkapi form JSA (langkah kerja) terlebih dahulu sebelum mengajukan review.');
       return;
     }
+    setJsaStatus('request_review');
     alert('JSA berhasil disubmit ke Pemberi Kerja untuk direview.');
     router.push('/dashboard/pemohon/data-management');
   };
@@ -119,22 +90,20 @@ export default function DetailJSAPage() {
     }
   };
 
-  const handleBack = () => {
-    router.back();
-  };
-
   return (
     <div className="min-h-screen bg-gray-100">
-
-      {/* ─── SEMUA KONTEN YANG AKAN DI-EXPORT (termasuk header) ─── */}
       <div ref={contentRef} className="bg-gray-100">
 
-        {/* ─── TOP NAVBAR (sekarang di dalam contentRef) ─── */}
         <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2" style={{ paddingLeft: '30px' }}>
+          <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
             <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
-            <div className="w-px h-5 bg-gray-300 mx-2" />
-            <span className="text-xs font-bold text-blue-600 uppercase tracking-widest">Detail Program SIKA DAN JSA (PERLU DIDISKUSIKAN LEBIH LANJUT)</span>
+            <div className="w-px h-10 bg-gray-200" />
+            <div className="flex flex-col leading-tight">
+              <span className="text-sm font-bold text-gray-800">Detail Program</span>
+              <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
+                Surat Izin Kerja (SIKA) &amp; Job Safety Analysis (JSA)
+              </span>
+            </div>
           </div>
 
           <div className="flex items-center gap-0">
@@ -155,21 +124,16 @@ export default function DetailJSAPage() {
                     {step.label}
                   </span>
                 </div>
-                {i < arr.length - 1 && (
-                  <div className="w-8 h-px bg-gray-200" />
-                )}
+                {i < arr.length - 1 && <div className="w-8 h-px bg-gray-200" />}
               </div>
             ))}
           </div>
         </div>
 
-        {/* ─── KONTEN UTAMA ─── */}
         <div className="px-6 py-6 space-y-4">
 
-          {/* ROW 1: DATA PROGRAM + JOB SAFETY ANALYSIS */}
           <div className="grid grid-cols-2 gap-4">
 
-            {/* DETAIL DATA PROGRAM */}
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
               <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between"
                 style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
@@ -179,7 +143,8 @@ export default function DetailJSAPage() {
                 </div>
                 <button
                   onClick={() => router.push('/dashboard/pemohon/program/new')}
-                  className="flex items-center gap-1 bg-green-500 hover:bg-green-600 text-white text-xs font-medium px-3 py-1.5 rounded transition">
+                  className="flex items-center gap-1 bg-white/20 hover:bg-white/30 text-white text-xs font-medium px-3 py-1.5 rounded-full transition"
+                >
                   <Pencil size={12} /> Edit
                 </button>
               </div>
@@ -203,7 +168,6 @@ export default function DetailJSAPage() {
               </div>
             </div>
 
-            {/* JOB SAFETY ANALYSIS */}
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
               <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between"
                 style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
@@ -213,7 +177,8 @@ export default function DetailJSAPage() {
                 </div>
                 <button
                   onClick={() => router.push('/dashboard/pemohon/jsa/new')}
-                  className="flex items-center gap-1 bg-green-500 hover:bg-green-600 text-white text-xs font-medium px-3 py-1.5 rounded transition">
+                  className="flex items-center gap-1 bg-white/20 hover:bg-white/30 text-white text-xs font-medium px-3 py-1.5 rounded-full transition"
+                >
                   <Pencil size={12} /> Edit
                 </button>
               </div>
@@ -236,10 +201,8 @@ export default function DetailJSAPage() {
             </div>
           </div>
 
-          {/* ROW 2: SIKA - JENIS PEKERJAAN + PEMERIKSAAN SIKA */}
           <div className="grid grid-cols-2 gap-4">
 
-            {/* SIKA - JENIS PEKERJAAN */}
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
               <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between"
                 style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
@@ -249,7 +212,8 @@ export default function DetailJSAPage() {
                 </div>
                 <button
                   onClick={() => router.push('/dashboard/pemohon/sika/new')}
-                  className="flex items-center gap-1 bg-green-500 hover:bg-green-600 text-white text-xs font-medium px-3 py-1.5 rounded transition">
+                  className="flex items-center gap-1 bg-white/20 hover:bg-white/30 text-white text-xs font-medium px-3 py-1.5 rounded-full transition"
+                >
                   <Pencil size={12} /> Edit
                 </button>
               </div>
@@ -294,7 +258,6 @@ export default function DetailJSAPage() {
               </div>
             </div>
 
-            {/* PEMERIKSAAN SIKA */}
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
               <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between"
                 style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
@@ -304,38 +267,41 @@ export default function DetailJSAPage() {
                 </div>
                 <button
                   onClick={() => router.push('/dashboard/pemohon/sika/pemeriksaan')}
-                  className="flex items-center gap-1 bg-green-500 hover:bg-green-600 text-white text-xs font-medium px-3 py-1.5 rounded transition">
+                  className="flex items-center gap-1 bg-white/20 hover:bg-white/30 text-white text-xs font-medium px-3 py-1.5 rounded-full transition"
+                >
                   <Pencil size={12} /> Edit
                 </button>
               </div>
               <div className="px-5 py-4 space-y-4 text-sm max-h-105 overflow-y-auto">
-                <ChipGroup label="Isolasi Peralatan" items={pemeriksaan?.isolasi} />
-                <ChipGroup label="Lampiran" items={pemeriksaan?.lampiran} />
-                <ChipGroup label="Identifikasi Bahaya" items={pemeriksaan?.identifikasi} />
-                {pemeriksaan?.identifikasiTambahan && (
+                <ChipGroup label="Isolasi Peralatan" items={sika?.isolasi} />
+                <ChipGroup label="Lampiran" items={sika?.lampiran} />
+                <ChipGroup label="Identifikasi Bahaya" items={sika?.identifikasi} />
+                {sika?.identifikasiTambahan && (
                   <div className="flex gap-3">
                     <span className="w-36 text-gray-600 shrink-0 font-medium">Identifikasi Tambahan</span>
                     <span className="text-gray-400 shrink-0">:</span>
-                    <span className="text-gray-800">{pemeriksaan.identifikasiTambahan}</span>
+                    <span className="text-gray-800">{sika.identifikasiTambahan}</span>
                   </div>
                 )}
-                <ChipGroup label="Pengendalian Bahaya" items={pemeriksaan?.pengendalian} />
-                {pemeriksaan?.permintaanTambahan && (
+                <ChipGroup label="Pengendalian Bahaya" items={sika?.pengendalian} />
+                {sika?.permintaanTambahan && (
                   <div className="flex gap-3">
                     <span className="w-36 text-gray-600 shrink-0 font-medium">Permintaan Tambahan</span>
                     <span className="text-gray-400 shrink-0">:</span>
-                    <span className="text-gray-800">{pemeriksaan.permintaanTambahan}</span>
+                    <span className="text-gray-800">{sika.permintaanTambahan}</span>
                   </div>
                 )}
-                <ChipGroup label="Sertifikat Dipilih" items={pemeriksaan?.sertifikat} />
+                <ChipGroup label="Sertifikat Dipilih" items={sika?.sertifikat} />
                 <div className="flex items-center gap-3">
                   <span className="w-36 text-gray-600 shrink-0 font-medium">Sifat Pekerjaan</span>
                   <span className="text-gray-400 shrink-0">:</span>
-                  {pemeriksaan?.sifatPekerjaan ? (
+                  {sika?.sifatPekerjaan ? (
                     <span className={`text-xs font-semibold px-3 py-1 rounded-full ${
-                      pemeriksaan.sifatPekerjaan === 'Emergency' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-700'
+                      sika.sifatPekerjaan === 'Emergency'
+                        ? 'bg-red-50 text-red-600'
+                        : 'bg-blue-50 text-blue-700'
                     }`}>
-                      {pemeriksaan.sifatPekerjaan}
+                      {sika.sifatPekerjaan}
                     </span>
                   ) : (
                     <span className="text-gray-400 text-xs">-</span>
@@ -346,39 +312,35 @@ export default function DetailJSAPage() {
           </div>
 
         </div>
-        {/* ─── END KONTEN UTAMA ─── */}
-        
       </div>
-      {/* ─── END KONTEN YANG DI-EXPORT ─── */}
 
-      {/* BOTTOM BUTTONS (di luar contentRef agar tidak ikut ke PDF) */}
       <div className="flex justify-end gap-2 pb-4 px-6 bg-gray-100">
         <button
           onClick={handleRequestReview}
-          className="flex items-center gap-1.5 bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-4 py-2 rounded transition shadow-md shadow-green-200">
+          className="flex items-center gap-1.5 bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-green-200"
+        >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           Request Review
         </button>
         <button
           onClick={handleCopyJSA}
           disabled={isExporting}
-          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded transition shadow-md shadow-blue-200">
+          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-blue-200"
+        >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
           </svg>
           {isExporting ? 'Mengexport...' : 'Copy JSA'}
         </button>
         <button
-          onClick={handleBack}
-          className="flex items-center gap-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-medium px-4 py-2 rounded transition shadow-md shadow-red-200">
+          onClick={() => router.back()}
+          className="flex items-center gap-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-red-200"
+        >
           <ChevronLeft size={14} /> Back
         </button>
       </div>
-
     </div>
   );
 }
