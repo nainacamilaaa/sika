@@ -25,7 +25,7 @@ interface PengajuanRow {
 }
 
 const mapJsaStatus = (status: string | null): StatusJSA => {
-  if (status === 'request_review' || status === 'request_approval') return 'request';
+  if (status === 'request' || status === 'waiting' || status === 'request_review' || status === 'request_approval') return 'request';
   if (status === 'approved') return 'approved';
   if (status === 'rejected') return 'rejected';
   return 'draft';
@@ -74,10 +74,10 @@ export default function DataManagementPemohonPage() {
     program,
     jsa,
     sika,
-    jsaStatus,
-    sikaStatus,
-    alasanTolakJSA,
-    alasanTolakSIKA,
+    jsaStatusPemberi,
+    sikaStatusPemberi,
+    alasanTolakJsaPemberi,
+    alasanTolakSikaPemberi,
   } = useProgramStore();
 
   const [filterProgram, setFilterProgram]   = useState('');
@@ -101,10 +101,10 @@ export default function DataManagementPemohonPage() {
       tanggalSIKA: sika?.tanggalSIKA || '',
       pemberiKerja: program.picPemberiList?.[0] || '-',
       pja: program.pimpinanPelaksanaList?.[0] || '-',
-      statusJSA: mapJsaStatus(jsaStatus),
-      statusSIKA: mapJsaStatus(sikaStatus),
-      alasanTolakJSA: alasanTolakJSA || undefined,
-      alasanTolakSIKA: alasanTolakSIKA || undefined,
+      statusJSA: mapJsaStatus(jsaStatusPemberi),
+      statusSIKA: mapJsaStatus(sikaStatusPemberi),
+      alasanTolakJSA: alasanTolakJsaPemberi || undefined,
+      alasanTolakSIKA: alasanTolakSikaPemberi || undefined,
     },
   ] : [];
 
@@ -154,7 +154,7 @@ export default function DataManagementPemohonPage() {
           <div className="flex flex-col leading-tight">
             <span className="text-sm font-bold text-gray-800">Monitoring Approval</span>
             <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
-              SIKA &amp; JSA
+              Pengajuan SIKA &amp; JSA Saya
             </span>
           </div>
         </div>
@@ -162,8 +162,8 @@ export default function DataManagementPemohonPage() {
         <div className="flex items-center pr-6">
           <button
             type="button"
-            onClick={() => router.push('/dashboard/pemohon')}
-            className="flex items-center gap-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-100 rounded-full pl-2 pr-4 py-1.5 transition-colors shadow-sm"
+            disabled
+            className="flex items-center gap-2.5 bg-blue-50 border border-blue-100 rounded-full pl-2 pr-4 py-1.5 cursor-default opacity-90"
           >
             <span className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center shrink-0">
               <LayoutDashboard size={13} className="text-white" />
