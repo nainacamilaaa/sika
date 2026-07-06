@@ -101,7 +101,7 @@ export default function PemohonLayout({ children }: { children: React.ReactNode 
               <p style={{
                 color: '#5d9dfa', fontSize: '0.6rem', margin: 0,
                 fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase',
-              }}>Surat Izin Kerja Aman</p>
+              }}>Surat Izin Kerja </p>
             </div>
           </div>
           <button

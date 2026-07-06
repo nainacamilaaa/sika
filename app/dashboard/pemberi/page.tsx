@@ -88,7 +88,7 @@ export default function DashboardPemberi() {
           {/* Buttons — always row */}
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '20px', flexWrap: 'wrap', justifyContent: 'center' }}>
             <button
-              onClick={() => router.push('/dashboard/pemberi/datamanagement')}
+              onClick={() => router.push('/dashboard/pemberi/approval-management')}
               style={{
                 padding: '12px 36px',
                 borderRadius: '9999px',
@@ -104,7 +104,7 @@ export default function DashboardPemberi() {
               onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#1d4ed8')}
               onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#2563EB')}
             >
-              Data Management
+              Approval Management
             </button>
             <button
               onClick={() => router.push('/dashboard/pemberi/report')}
@@ -129,7 +129,7 @@ export default function DashboardPemberi() {
                 e.currentTarget.style.color = '#fff';
               }}
             >
-              Report
+              Data Management
             </button>
           </div>
         </div>
