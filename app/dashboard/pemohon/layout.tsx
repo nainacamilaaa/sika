@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Menu, X, Home, FileText, ClipboardList, ChevronRight, LogOut, Settings, Bell } from 'lucide-react';
+import { Menu, X, Home, FileText, ClipboardList, ChevronRight, LogOut, Settings, Bell, BarChart2 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 
 const navItems = [
@@ -17,6 +17,12 @@ const navItems = [
     items: [
       { icon: FileText, label: 'Entry Data', href: '/dashboard/pemohon/program/new' },
       { icon: ClipboardList, label: 'Data Management', href: '/dashboard/pemohon/data-management' },
+    ],
+  },
+  {
+    section: 'MONITORING',
+    items: [
+      { icon: BarChart2, label: 'Monitoring SIKA', href: '/dashboard/pemohon/monitoring' },
     ],
   },
 ];
@@ -52,50 +58,35 @@ export default function PemohonLayout({ children }: { children: React.ReactNode 
         .pemohon-nav-item:hover .pemohon-nav-icon { transform: scale(1.06); }
       `}</style>
 
-      {/* ─── SIDEBAR BACKDROP ─── */}
       {sidebarOpen && (
         <div
           onClick={() => setSidebarOpen(false)}
           style={{
-            position: 'fixed',
-            inset: 0,
+            position: 'fixed', inset: 0,
             backgroundColor: 'rgba(0,0,0,0.45)',
-            zIndex: 40,
-            backdropFilter: 'blur(2px)',
+            zIndex: 40, backdropFilter: 'blur(2px)',
             transition: 'opacity 0.25s ease',
           }}
         />
       )}
 
-      {/* ─── SIDEBAR PANEL ─── */}
       <aside
         style={{
-          position: 'fixed',
-          top: 10,
-          left: 10,
-          height: 'calc(100vh - 20px)',
-          width: '276px',
+          position: 'fixed', top: 10, left: 10,
+          height: 'calc(100vh - 20px)', width: '276px',
           background: 'linear-gradient(190deg, #14295a 0%, #0f2044 55%, #0c1a37 100%)',
-          zIndex: 50,
-          display: 'flex',
-          flexDirection: 'column',
-          borderRadius: 18,
-          border: '1px solid rgba(255,255,255,0.06)',
+          zIndex: 50, display: 'flex', flexDirection: 'column',
+          borderRadius: 18, border: '1px solid rgba(255,255,255,0.06)',
           transform: sidebarOpen ? 'translateX(0)' : 'translateX(calc(-100% - 20px))',
           transition: 'transform 0.36s cubic-bezier(0.32, 0.72, 0, 1)',
-          boxShadow: sidebarOpen
-            ? '8px 0 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.03)'
-            : 'none',
+          boxShadow: sidebarOpen ? '8px 0 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.03)' : 'none',
           overflow: 'hidden',
         }}
       >
-        {/* Header */}
         <div style={{
           padding: '20px 18px 16px',
           borderBottom: '1px solid rgba(255,255,255,0.07)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '11px' }}>
             <div style={{
@@ -110,9 +101,7 @@ export default function PemohonLayout({ children }: { children: React.ReactNode 
               <p style={{
                 color: '#5d9dfa', fontSize: '0.6rem', margin: 0,
                 fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase',
-              }}>
-                Surat Izin Kerja Aman
-              </p>
+              }}>Surat Izin Kerja Aman</p>
             </div>
           </div>
           <button
@@ -130,13 +119,9 @@ export default function PemohonLayout({ children }: { children: React.ReactNode 
           </button>
         </div>
 
-        {/* User Info */}
         <div style={{
-          margin: '14px 14px 6px',
-          padding: '12px 13px',
-          borderRadius: 13,
-          background: 'rgba(255,255,255,0.045)',
-          border: '1px solid rgba(255,255,255,0.07)',
+          margin: '14px 14px 6px', padding: '12px 13px', borderRadius: 13,
+          background: 'rgba(255,255,255,0.045)', border: '1px solid rgba(255,255,255,0.07)',
           display: 'flex', alignItems: 'center', gap: '12px',
         }}>
           <div style={{ position: 'relative', flexShrink: 0 }}>
@@ -176,7 +161,6 @@ export default function PemohonLayout({ children }: { children: React.ReactNode 
           </button>
         </div>
 
-        {/* Nav Items */}
         <nav className="pemohon-nav-scroll" style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
           {navItems.map((group) => (
             <div key={group.section} style={{ marginBottom: '8px' }}>
@@ -188,7 +172,7 @@ export default function PemohonLayout({ children }: { children: React.ReactNode 
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', padding: '0 12px' }}>
                 {group.items.map((item) => {
-                  const isActive = pathname === item.href;
+                  const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
                   return (
                     <button
                       key={item.label}
@@ -196,12 +180,10 @@ export default function PemohonLayout({ children }: { children: React.ReactNode 
                       onClick={() => { setSidebarOpen(false); router.push(item.href); }}
                       style={{
                         width: '100%', display: 'flex', alignItems: 'center', gap: '12px',
-                        padding: '9px 12px',
-                        borderRadius: 11,
+                        padding: '9px 12px', borderRadius: 11,
                         background: isActive ? 'rgba(37,99,235,0.18)' : 'transparent',
                         boxShadow: isActive ? '0 0 0 1px rgba(59,123,245,0.3), 0 4px 14px rgba(37,99,235,0.18)' : 'none',
-                        border: 'none',
-                        cursor: 'pointer',
+                        border: 'none', cursor: 'pointer',
                         color: isActive ? '#a8c8ff' : '#8b96ab',
                         fontSize: '0.83rem', fontWeight: isActive ? 600 : 500,
                         textAlign: 'left',
@@ -226,8 +208,7 @@ export default function PemohonLayout({ children }: { children: React.ReactNode 
                         className="pemohon-nav-icon"
                         style={{
                           width: 28, height: 28, borderRadius: 8,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          flexShrink: 0,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                           background: isActive ? 'linear-gradient(160deg, #3b7bf5 0%, #2563EB 100%)' : 'transparent',
                           color: isActive ? '#fff' : 'inherit',
                           transition: 'transform 0.18s ease',
@@ -245,7 +226,6 @@ export default function PemohonLayout({ children }: { children: React.ReactNode 
           ))}
         </nav>
 
-        {/* Sidebar Footer */}
         <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', padding: '10px 12px 12px' }}>
           <button
             onClick={() => { setSidebarOpen(false); router.push('#'); }}
@@ -260,7 +240,7 @@ export default function PemohonLayout({ children }: { children: React.ReactNode 
           >
             <span style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <Settings size={15} />
-            </span> 
+            </span>
             <span>Pengaturan</span>
           </button>
           <button
@@ -282,22 +262,13 @@ export default function PemohonLayout({ children }: { children: React.ReactNode 
         </div>
       </aside>
 
-      {/* ─── TRIGGER BUTTON (global, floating) ─── */}
       <button
         onClick={() => setSidebarOpen(true)}
         style={{
-          position: 'fixed',
-          top: 14,
-          left: 16,
-          zIndex: 30,
-          background: '#fff',
-          border: '1px solid #e5e7eb',
-          cursor: 'pointer',
-          padding: '8px',
-          borderRadius: 9,
-          color: '#475569',
-          display: sidebarOpen ? 'none' : 'flex',
-          alignItems: 'center',
+          position: 'fixed', top: 14, left: 16, zIndex: 30,
+          background: '#fff', border: '1px solid #e5e7eb', cursor: 'pointer',
+          padding: '8px', borderRadius: 9, color: '#475569',
+          display: sidebarOpen ? 'none' : 'flex', alignItems: 'center',
           boxShadow: '0 1px 3px rgba(0,0,0,0.07)',
           transition: 'background 0.15s, box-shadow 0.15s, transform 0.15s',
         }}
@@ -307,7 +278,6 @@ export default function PemohonLayout({ children }: { children: React.ReactNode 
         <Menu size={20} />
       </button>
 
-      {/* ─── PAGE CONTENT ─── */}
       {children}
     </div>
   );

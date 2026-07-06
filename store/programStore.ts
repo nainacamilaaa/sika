@@ -110,6 +110,13 @@ interface SikaPemeriksaanData {
 
 type SikaData = SikaBasicData & SikaPemeriksaanData;
 
+interface SertifikatData {
+  nama: string;
+  data: Record<string, any>;
+  diisiOleh: string;
+  diisiPada: string;
+}
+
 interface WorkPermitData {
   no: number;
   noWP: string;
@@ -124,6 +131,18 @@ interface WorkPermitData {
 
 type JSAStatus = 'draft' | 'request_review' | 'request_approval' | 'approved' | 'rejected';
 type SIKAStatus = 'draft' | 'request' | 'approved' | 'rejected';
+
+type ApprovalStatus = 'draft' | 'request' | 'waiting' | 'approved' | 'rejected';
+
+interface ApprovalLogEntry {
+  id: string;
+  dokumen: 'sika' | 'jsa';
+  aksi: 'approve' | 'reject' | 'ajukan_ulang';
+  oleh: string;
+  peran: 'pemberi' | 'pja' | 'pemohon';
+  alasan?: string;
+  timestamp: string;
+}
 
 const defaultSika: SikaData = {
   fungsiPerusahaan: '',
@@ -144,6 +163,14 @@ const defaultSika: SikaData = {
   sifatPekerjaan: '',
 };
 
+const makeLogEntry = (
+  entry: Omit<ApprovalLogEntry, 'id' | 'timestamp'>
+): ApprovalLogEntry => ({
+  ...entry,
+  id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  timestamp: new Date().toISOString(),
+});
+
 interface ProgramStore {
   program: ProgramData | null;
   jsa: JSAData | null;
@@ -159,6 +186,20 @@ interface ProgramStore {
   savedWPs: string[];
   workPermitList: WorkPermitData[];
   filledSertifikat: string[];
+
+  sikaStatusPemberi: ApprovalStatus;
+  jsaStatusPemberi: ApprovalStatus;
+  alasanTolakSikaPemberi: string | null;
+  alasanTolakJsaPemberi: string | null;
+
+  sikaStatusPJA: ApprovalStatus;
+  jsaStatusPJA: ApprovalStatus;
+  alasanTolakSikaPJA: string | null;
+  alasanTolakJsaPJA: string | null;
+
+  approvalHistory: ApprovalLogEntry[];
+
+  sertifikatData: Record<string, SertifikatData>;
 
   setProgram: (data: ProgramData) => void;
   setJSA: (data: JSAData) => void;
@@ -179,12 +220,29 @@ interface ProgramStore {
   removeWorkPermit: (no: number) => void;
   markSertifikatFilled: (nama: string) => void;
   unmarkSertifikat: (nama: string) => void;
+  setSertifikatData: (nama: string, data: Record<string, any>, diisiOleh: string) => void;
+  removeSertifikatData: (nama: string) => void;
+
+  ajukanUlangSika: (oleh: string) => void;
+  ajukanUlangJsa: (oleh: string) => void;
+  submitToPemberi: (oleh: string) => void;
+
+  approveSikaPemberi: (oleh: string) => void;
+  rejectSikaPemberi: (oleh: string, alasan: string) => void;
+  approveJsaPemberi: (oleh: string) => void;
+  rejectJsaPemberi: (oleh: string, alasan: string) => void;
+
+  approveSikaPJA: (oleh: string) => void;
+  rejectSikaPJA: (oleh: string, alasan: string) => void;
+  approveJsaPJA: (oleh: string) => void;
+  rejectJsaPJA: (oleh: string, alasan: string) => void;
+
   reset: () => void;
 }
 
 export const useProgramStore = create<ProgramStore>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       program: null,
       jsa: null,
       sika: null,
@@ -200,10 +258,22 @@ export const useProgramStore = create<ProgramStore>()(
       workPermitList: [],
       filledSertifikat: [],
 
+      sikaStatusPemberi: 'draft',
+      jsaStatusPemberi: 'draft',
+      alasanTolakSikaPemberi: null,
+      alasanTolakJsaPemberi: null,
+
+      sikaStatusPJA: 'draft',
+      jsaStatusPJA: 'draft',
+      alasanTolakSikaPJA: null,
+      alasanTolakJsaPJA: null,
+
+      approvalHistory: [],
+
+      sertifikatData: {},
+
       setProgram: (data) => set({ program: data }),
-
       setJSA: (data) => set({ jsa: data }),
-
       setSika: (data) => set({ sika: data }),
 
       setSikaBasic: (data) =>
@@ -243,7 +313,6 @@ export const useProgramStore = create<ProgramStore>()(
         })),
 
       setJsaStatus: (status) => set({ jsaStatus: status }),
-
       setSikaStatus: (status) => set({ sikaStatus: status }),
 
       setAlasanTolak: (type, alasan) =>
@@ -287,6 +356,168 @@ export const useProgramStore = create<ProgramStore>()(
           filledSertifikat: state.filledSertifikat.filter((v) => v !== nama),
         })),
 
+      setSertifikatData: (nama, data, diisiOleh) =>
+        set((state) => ({
+          sertifikatData: {
+            ...state.sertifikatData,
+            [nama]: {
+              nama,
+              data,
+              diisiOleh,
+              diisiPada: new Date().toISOString(),
+            },
+          },
+        })),
+
+      removeSertifikatData: (nama) =>
+        set((state) => {
+          const next = { ...state.sertifikatData };
+          delete next[nama];
+          return { sertifikatData: next };
+        }),
+
+      submitToPemberi: (oleh) =>
+        set((state) => ({
+          sikaStatusPemberi: 'request',
+          jsaStatusPemberi: 'request',
+          approvalHistory: [
+            ...state.approvalHistory,
+            makeLogEntry({ dokumen: 'sika', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
+            makeLogEntry({ dokumen: 'jsa', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
+          ],
+        })),
+
+      ajukanUlangSika: (oleh) =>
+        set((state) => ({
+          sikaStatusPemberi: 'request',
+          alasanTolakSikaPemberi: null,
+          approvalHistory: [
+            ...state.approvalHistory,
+            makeLogEntry({ dokumen: 'sika', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
+          ],
+        })),
+
+      ajukanUlangJsa: (oleh) =>
+        set((state) => ({
+          jsaStatusPemberi: 'request',
+          alasanTolakJsaPemberi: null,
+          approvalHistory: [
+            ...state.approvalHistory,
+            makeLogEntry({ dokumen: 'jsa', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
+          ],
+        })),
+
+      approveSikaPemberi: (oleh) => {
+        const state = get();
+        if (state.sikaStatusPemberi === 'approved') return;
+        set({
+          sikaStatusPemberi: 'approved',
+          alasanTolakSikaPemberi: null,
+          sikaStatusPJA: 'waiting',
+          approvalHistory: [
+            ...state.approvalHistory,
+            makeLogEntry({ dokumen: 'sika', aksi: 'approve', oleh, peran: 'pemberi' }),
+          ],
+        });
+      },
+
+      rejectSikaPemberi: (oleh, alasan) => {
+        const state = get();
+        if (state.sikaStatusPemberi === 'approved') return;
+        set({
+          sikaStatusPemberi: 'rejected',
+          alasanTolakSikaPemberi: alasan,
+          sikaStatusPJA: 'draft',
+          approvalHistory: [
+            ...state.approvalHistory,
+            makeLogEntry({ dokumen: 'sika', aksi: 'reject', oleh, peran: 'pemberi', alasan }),
+          ],
+        });
+      },
+
+      approveJsaPemberi: (oleh) => {
+        const state = get();
+        if (state.sikaStatusPemberi !== 'approved') return;
+        if (state.jsaStatusPemberi === 'approved') return;
+        set({
+          jsaStatusPemberi: 'approved',
+          alasanTolakJsaPemberi: null,
+          jsaStatusPJA: 'waiting',
+          approvalHistory: [
+            ...state.approvalHistory,
+            makeLogEntry({ dokumen: 'jsa', aksi: 'approve', oleh, peran: 'pemberi' }),
+          ],
+        });
+      },
+
+      rejectJsaPemberi: (oleh, alasan) => {
+        const state = get();
+        if (state.jsaStatusPemberi === 'approved') return;
+        set({
+          jsaStatusPemberi: 'rejected',
+          alasanTolakJsaPemberi: alasan,
+          jsaStatusPJA: 'draft',
+          approvalHistory: [
+            ...state.approvalHistory,
+            makeLogEntry({ dokumen: 'jsa', aksi: 'reject', oleh, peran: 'pemberi', alasan }),
+          ],
+        });
+      },
+
+      approveSikaPJA: (oleh) => {
+        const state = get();
+        if (state.sikaStatusPJA === 'approved') return;
+        if (state.sikaStatusPemberi !== 'approved') return;
+        set({
+          sikaStatusPJA: 'approved',
+          alasanTolakSikaPJA: null,
+          approvalHistory: [
+            ...state.approvalHistory,
+            makeLogEntry({ dokumen: 'sika', aksi: 'approve', oleh, peran: 'pja' }),
+          ],
+        });
+      },
+
+      rejectSikaPJA: (oleh, alasan) => {
+        const state = get();
+        if (state.sikaStatusPJA === 'approved') return;
+        set({
+          sikaStatusPJA: 'rejected',
+          alasanTolakSikaPJA: alasan,
+          approvalHistory: [
+            ...state.approvalHistory,
+            makeLogEntry({ dokumen: 'sika', aksi: 'reject', oleh, peran: 'pja', alasan }),
+          ],
+        });
+      },
+
+      approveJsaPJA: (oleh) => {
+        const state = get();
+        if (state.jsaStatusPJA === 'approved') return;
+        if (state.jsaStatusPemberi !== 'approved') return;
+        set({
+          jsaStatusPJA: 'approved',
+          alasanTolakJsaPJA: null,
+          approvalHistory: [
+            ...state.approvalHistory,
+            makeLogEntry({ dokumen: 'jsa', aksi: 'approve', oleh, peran: 'pja' }),
+          ],
+        });
+      },
+
+      rejectJsaPJA: (oleh, alasan) => {
+        const state = get();
+        if (state.jsaStatusPJA === 'approved') return;
+        set({
+          jsaStatusPJA: 'rejected',
+          alasanTolakJsaPJA: alasan,
+          approvalHistory: [
+            ...state.approvalHistory,
+            makeLogEntry({ dokumen: 'jsa', aksi: 'reject', oleh, peran: 'pja', alasan }),
+          ],
+        });
+      },
+
       reset: () =>
         set({
           program: null,
@@ -303,6 +534,16 @@ export const useProgramStore = create<ProgramStore>()(
           savedWPs: [],
           workPermitList: [],
           filledSertifikat: [],
+          sikaStatusPemberi: 'draft',
+          jsaStatusPemberi: 'draft',
+          alasanTolakSikaPemberi: null,
+          alasanTolakJsaPemberi: null,
+          sikaStatusPJA: 'draft',
+          jsaStatusPJA: 'draft',
+          alasanTolakSikaPJA: null,
+          alasanTolakJsaPJA: null,
+          approvalHistory: [],
+          sertifikatData: {},
         }),
     }),
     { name: 'sika-program' }
@@ -323,4 +564,7 @@ export type {
   WorkPermitData,
   JSAStatus,
   SIKAStatus,
+  ApprovalStatus,
+  ApprovalLogEntry,
+  SertifikatData,
 };

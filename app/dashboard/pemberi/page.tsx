@@ -88,7 +88,7 @@ export default function DashboardPemberi() {
           {/* Buttons — always row */}
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '20px', flexWrap: 'wrap', justifyContent: 'center' }}>
             <button
-              onClick={() => router.push('/dashboard/pemberi/data-management')}
+              onClick={() => router.push('/dashboard/pemberi/datamanagement')}
               style={{
                 padding: '12px 36px',
                 borderRadius: '9999px',

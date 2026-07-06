@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Pencil, ChevronLeft } from 'lucide-react';
 import { useProgramStore } from '@/store/programStore';
+import { useAuthStore } from '@/store/authStore';
 import jsPDF from 'jspdf';
 import { toPng } from 'html-to-image';
 
@@ -28,7 +29,8 @@ function ChipGroup({ label, items }: { label: string; items?: string[] }) {
 
 export default function DetailProgramPage() {
   const router = useRouter();
-  const { program, jsa, sika, setJsaStatus } = useProgramStore();
+  const { program, jsa, sika, setJsaStatus, submitToPemberi, sikaStatusPemberi, jsaStatusPemberi } = useProgramStore();
+  const { user } = useAuthStore();
   const contentRef = useRef<HTMLDivElement>(null);
   const [isExporting, setIsExporting] = useState(false);
 
@@ -37,6 +39,8 @@ export default function DetailProgramPage() {
     else if (!sika) router.replace('/dashboard/pemohon/sika/new');
     else if (!jsa) router.replace('/dashboard/pemohon/jsa/new');
   }, [program, sika, jsa]);
+
+  const alreadySubmitted = sikaStatusPemberi !== 'draft' || jsaStatusPemberi !== 'draft';
 
   const handleRequestReview = () => {
     const hasLangkah = jsa?.sections?.some((sec) =>
@@ -47,7 +51,8 @@ export default function DetailProgramPage() {
       return;
     }
     setJsaStatus('request_review');
-    alert('JSA berhasil disubmit ke Pemberi Kerja untuk direview.');
+    submitToPemberi(user?.name || 'Pemohon');
+    alert('SIKA dan JSA berhasil diajukan ke Pemberi Kerja untuk direview.');
     router.push('/dashboard/pemohon/data-management');
   };
 
@@ -317,12 +322,13 @@ export default function DetailProgramPage() {
       <div className="flex justify-end gap-2 pb-4 px-6 bg-gray-100">
         <button
           onClick={handleRequestReview}
-          className="flex items-center gap-1.5 bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-green-200"
+          disabled={alreadySubmitted}
+          className="flex items-center gap-1.5 bg-green-500 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-green-200"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          Request Review
+          {alreadySubmitted ? 'Sudah Diajukan' : 'Request Review'}
         </button>
         <button
           onClick={handleCopyJSA}
