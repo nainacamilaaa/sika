@@ -52,25 +52,25 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundImage: "url('/loginopacity.svg')", backgroundSize: 'cover', backgroundPosition: 'center' }}>
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundImage: "url('/backgroundlogin.svg')", backgroundSize: 'cover', backgroundPosition: 'center' }}>
       <div
         className="bg-white rounded-2xl shadow-xl overflow-hidden w-full max-w-4xl flex"
         style={{ minHeight: '520px' }}
       >
-
-        {/* ─── LEFT PANEL ─── */}
         <div className="flex-1 flex flex-col justify-between p-10 min-w-0">
-
-          {/* Logo */}
-          <div className="mb-4">
+          <div className="mb-4 flex items-center justify-between">
             <img
               src="/logosika.svg"
               alt="SIKA"
               className="h-12 object-contain"
             />
+            <img
+              src="/logopertaminagasfull.svg"
+              alt="Pertamina Gas"
+              className="h-10 object-contain"
+            />
           </div>
 
-          {/* Heading */}
           <div className="flex-1 flex flex-col justify-center">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
               Selamat Datang di <span className="text-blue-600">SIKA!</span>
@@ -80,7 +80,6 @@ export default function LoginPage() {
               dan monitoring aktivitas kerja secara terintegrasi
             </p>
 
-            {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
@@ -137,30 +136,18 @@ export default function LoginPage() {
             </form>
           </div>
 
-          {/* Footer */}
           <div className="mt-8 flex items-center justify-between text-xs text-gray-400">
             <span>HSSE | Perusahaan Gas Negara</span>
             <span>© 2026</span>
           </div>
-
         </div>
 
-        {/* ─── RIGHT PANEL ─── */}
-      <div className="hidden md:block w-80 lg:w-96 relative shrink-0">
-        <div
-          className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: "url('/login-bg.svg')" }}
-        />
-        <div className="absolute inset-0 bg-linear-to-t from-blue-950 via-blue-900/40 to-transparent" />
-        <div className="absolute bottom-0 left-0 right-0 p-6">
-          <div className="border-l-4 border-blue-400 pl-4">
-            <p className="text-white text-xs leading-relaxed italic opacity-90">
-              "Mendukung pengelolaan JSA dan Sistem Kerja Aman demi pekerjaan lapangan yang aman, terencana, dan terdokumentasi."
-            </p>
-          </div>
+        <div className="hidden md:block w-80 lg:w-96 relative shrink-0">
+          <div
+            className="absolute inset-0 bg-cover bg-center"
+            style={{ backgroundImage: "url('/login-bg.svg')" }}
+          />
         </div>
-      </div>
-
       </div>
     </div>
   );

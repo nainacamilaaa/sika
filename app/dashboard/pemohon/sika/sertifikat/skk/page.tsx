@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useProgramStore } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
-import { Users, Lock, CheckCircle } from 'lucide-react';
+import { Users, Lock, CheckCircle, Plus, Trash2 } from 'lucide-react';
 
 const checklistItemsPA = [
   'Lantai dudukan tiang scaffold rata',
@@ -46,6 +46,22 @@ const safetyNotes = [
   'Pijakan perancah harus kuat, keras dan mampu menahan beban maksimum, naikkan dan menurunkan material harus menggunakan tali.',
   'Semua material diatas perancah harus disimpan dengan aman dari kemungkinan jatuh.',
 ];
+
+type GasRow = {
+  time: string;
+  lel: string;
+  o2: string;
+  h2s: string;
+  co2: string;
+  co: string;
+  temp: string;
+  sign: string;
+  remark: string;
+};
+
+const emptyGasRow = (): GasRow => ({
+  time: '', lel: '', o2: '', h2s: '', co2: '', co: '', temp: '', sign: '', remark: '',
+});
 
 function ReadOnlyField({ label, value, multiline = false }: { label: string; value: string; multiline?: boolean }) {
   return (
@@ -120,6 +136,7 @@ function VerifikasiPanel({
     </div>
   );
 }
+
 function CheckRow({ label, val, onToggle }: { label: string; val: 'yes' | 'no' | null; onToggle: (v: 'yes' | 'no') => void }) {
   return (
     <tr className={`border-b border-gray-100 transition-colors ${val === 'yes' ? 'bg-green-50' : val === 'no' ? 'bg-red-50' : 'bg-white'}`}>
@@ -140,6 +157,136 @@ function CheckRow({ label, val, onToggle }: { label: string; val: 'yes' | 'no' |
   );
 }
 
+// ═══════════════════════════════════════════════════════════
+// Formulir Pemeriksaan Kondisi Gas (Inline)
+// ═══════════════════════════════════════════════════════════
+function FormKondisiGas({
+  rows,
+  diukurOleh,
+  onDiukurOlehChange,
+  onRowChange,
+  onAddRow,
+  onRemoveRow,
+}: {
+  rows: GasRow[];
+  diukurOleh: string;
+  onDiukurOlehChange: (val: string) => void;
+  onRowChange: (index: number, field: keyof GasRow, value: string) => void;
+  onAddRow: () => void;
+  onRemoveRow: (index: number) => void;
+}) {
+  const inputCls =
+    'w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900 text-center focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition';
+
+  return (
+    <div className="rounded border-2 border-blue-300 overflow-hidden bg-white">
+      <div className="bg-blue-50 border-b border-blue-200 px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <p className="text-sm font-bold text-blue-700 uppercase tracking-wide">Formulir Pemeriksaan Kondisi Gas</p>
+          <p className="text-xs text-blue-400">Nomor Sika & Lokasi Kerja mengikuti data di atas</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600 whitespace-nowrap">Di ukur oleh:</label>
+          <input
+            type="text"
+            value={diukurOleh}
+            onChange={(e) => onDiukurOlehChange(e.target.value)}
+            placeholder="Nama petugas..."
+            className="border border-gray-200 rounded px-3 py-1.5 text-sm text-gray-900 w-52 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition"
+          />
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse min-w-[900px]">
+          <thead>
+            <tr className="bg-blue-100">
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold w-10">No</th>
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold w-24">Time</th>
+              <th colSpan={5} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold">Gas</th>
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold w-20">Temp °C</th>
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold w-24">Sign</th>
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold min-w-[140px]">Remark</th>
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 w-10"></th>
+            </tr>
+            <tr className="bg-blue-100">
+              <th className="border border-blue-200 px-2 py-1.5 text-blue-600 font-medium w-20">LEL %</th>
+              <th className="border border-blue-200 px-2 py-1.5 text-blue-600 font-medium w-20">O2 %</th>
+              <th className="border border-blue-200 px-2 py-1.5 text-blue-600 font-medium w-24">H2S ppm</th>
+              <th className="border border-blue-200 px-2 py-1.5 text-blue-600 font-medium w-24">CO2 ppm</th>
+              <th className="border border-blue-200 px-2 py-1.5 text-blue-600 font-medium w-24">CO ppm</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                <td className="border border-gray-100 px-2 py-1.5 text-center text-gray-500 font-mono">
+                  {String(index + 1).padStart(2, '0')}
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="time" value={row.time} onChange={(e) => onRowChange(index, 'time', e.target.value)} className={inputCls} />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.lel} onChange={(e) => onRowChange(index, 'lel', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.o2} onChange={(e) => onRowChange(index, 'o2', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.h2s} onChange={(e) => onRowChange(index, 'h2s', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.co2} onChange={(e) => onRowChange(index, 'co2', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.co} onChange={(e) => onRowChange(index, 'co', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.temp} onChange={(e) => onRowChange(index, 'temp', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.sign} onChange={(e) => onRowChange(index, 'sign', e.target.value)} className={inputCls} placeholder="..." />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input
+                    type="text"
+                    value={row.remark}
+                    onChange={(e) => onRowChange(index, 'remark', e.target.value)}
+                    className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition"
+                    placeholder="Catatan..."
+                  />
+                </td>
+                <td className="border border-gray-100 px-1 py-1.5 text-center">
+                  <button
+                    type="button"
+                    onClick={() => onRemoveRow(index)}
+                    disabled={rows.length === 1}
+                    className={`transition ${rows.length === 1 ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-red-500'}`}
+                    title="Hapus baris"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="px-4 py-3 border-t border-blue-100 bg-gray-50">
+        <button
+          type="button"
+          onClick={onAddRow}
+          className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium transition"
+        >
+          <Plus size={14} />
+          Tambah Baris
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function SKKPage() {
   const router = useRouter();
   const { sika, markSertifikatFilled } = useProgramStore();
@@ -148,7 +295,6 @@ export default function SKKPage() {
   const canEditPA = user?.role === 'pemberi';
   const canEditIA = user?.role === 'pja';
 
-  // State untuk notifikasi
   const [showSuccess, setShowSuccess] = useState(false);
 
   const [checklistPA, setChecklistPA] = useState<Record<number, 'yes' | 'no' | null>>(
@@ -171,6 +317,23 @@ export default function SKKPage() {
   const [noPekerja, setNoPekerja] = useState('');
   const [fungsiInspektur, setFungsiInspektur] = useState('');
 
+  // Gas Monitoring
+  const [gasMonitoring, setGasMonitoring] = useState<'ya' | 'tidak' | null>(null);
+  const [gasRows, setGasRows] = useState<GasRow[]>([emptyGasRow()]);
+  const [diukurOleh, setDiukurOleh] = useState('');
+
+  const updateGasRow = (index: number, field: keyof GasRow, value: string) => {
+    setGasRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
+  };
+
+  const addGasRow = () => setGasRows((prev) => [...prev, emptyGasRow()]);
+
+  const removeGasRow = (index: number) => {
+    setGasRows((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
+  };
+
+  const sudahIsiGas = gasRows.some(r => r.time || r.lel || r.o2 || r.h2s || r.co2 || r.co || r.temp || r.sign || r.remark);
+
   // Material fields
   const [materialFields, setMaterialFields] = useState({
     papanPanjang: '', papanLebar: '', papanTebal: '', papanJumlah: '',
@@ -187,42 +350,33 @@ export default function SKKPage() {
   const totalFilled = totalPA + totalIA;
   const totalItems = checklistItemsPA.length + checklistItemsIA.length;
 
-  // Handler untuk Simpan
   const handleSimpan = () => {
-    // Tandai sertifikat sebagai terisi di store
-    markSertifikatFilled('Sertifikat Kerja Di Ketinggian (SKK)');
-    
-    // Tampilkan notifikasi sukses
+    markSertifikatFilled('Sertifikat Kerja di Ketinggian (SKK)');
     setShowSuccess(true);
-    
-    // Redirect setelah 1.5 detik
     setTimeout(() => {
-      router.push('/dashboard/pemohon/sika/pemeriksaan');
+      router.push('/dashboard/pemohon/sika/new');
     }, 1500);
   };
 
-  // Handler untuk Save and Close
   const handleSaveAndClose = () => {
-    // Tandai sertifikat sebagai terisi
     markSertifikatFilled('Sertifikat Kerja di Ketinggian (SKK)');
-    router.push('/dashboard/pemohon/sika/pemeriksaan');
+    router.push('/dashboard/pemohon/sika/new');
   };
 
   return (
     <div className="min-h-screen bg-gray-100">
 
-      {/* TOP NAVBAR */}
+      {/* TOP NAVBAR - Disamakan dengan SKP */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
-        <div className="flex items-center gap-2" style={{ paddingLeft: '30px' }}>
+        <div className="flex items-center gap-3" style={{ paddingLeft: '30px' }}>
           <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
-          <span className="font-bold text-gray-800 text-sm tracking-wide">ENTRY DATA</span>
-        </div>
-        <div className="text-sm font-medium flex items-center gap-1">
-          <span className="text-blue-400 cursor-pointer hover:underline" onClick={() => router.push('/dashboard/pemohon/sika/new')}>JENIS PEKERJAAN</span>
-          <span className="text-gray-400">&gt;</span>
-          <span className="text-blue-400 cursor-pointer hover:underline" onClick={() => router.push('/dashboard/pemohon/sika/pemeriksaan')}>PEMERIKSAAN</span>
-          <span className="text-gray-400">&gt;</span>
-          <span className="text-blue-800 font-semibold">SKK</span>
+          <div className="w-px h-10 bg-gray-200" />
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm font-bold text-gray-800">Entry Data</span>
+            <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
+              Sertifikat Kerja di Ketinggian
+            </span>
+          </div>
         </div>
       </div>
 
@@ -241,8 +395,10 @@ export default function SKKPage() {
 
       <div className="px-6 py-6 space-y-4">
 
-        {/* HERO HEADER */}
-        <div className="bg-white rounded border-2 border-blue-400 overflow-hidden">
+        {/* SATU BORDER — Hero s/d Bagian 5 dalam 1 container */}
+        <div className="bg-white rounded border-2 border-white shadow-lg overflow-hidden">
+
+          {/* HERO HEADER */}
           <div className="flex justify-end px-4 pt-2">
             <span className="text-xs text-gray-400 font-mono">F-01W/B-003/PG0300/2026-S9</span>
           </div>
@@ -252,26 +408,24 @@ export default function SKKPage() {
               <input type="text" placeholder="..."
                 className="border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-700 w-44 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition" />
             </div>
-            <div className="flex-1 flex items-center justify-center px-6 py-4" style={{ backgroundColor: '#0070c0' }}>
+            <div style={{ flex: 3, backgroundColor: '#0070c0', minHeight: '80px' }} className="flex items-center justify-center px-6 py-4">
               <h1 style={{ color: '#ffffff', fontWeight: 900, fontSize: '18px', letterSpacing: '0.12em', textTransform: 'uppercase', margin: 0 }}>
                 Sertifikat Kerja di Ketinggian
               </h1>
             </div>
-            <div className="flex items-center justify-center px-6 py-4 border-l border-gray-200 bg-white shrink-0" style={{ minWidth: '180px' }}>
-              <img src="/logopertaminagas.svg" alt="Pertamina Gas" className="h-10 object-contain" />
-            </div>
+            <div className="border-l border-gray-200 bg-white" style={{
+              flex: 1,
+              minHeight: '80px',
+              backgroundImage: 'url(/logopertaminagaswhite.svg)',
+              backgroundSize: '100%',
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'left center',
+            }} />
           </div>
-          <div className="px-5 py-2.5 bg-blue-50 border-t border-blue-200 flex items-center justify-between">
-            <span className="text-xs font-bold text-blue-600 uppercase tracking-wide">SKK</span>
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${totalFilled === totalItems ? 'bg-green-500' : 'bg-amber-400'}`} />
-              <span className="text-xs text-gray-500">{totalFilled}/{totalItems} item checklist terisi</span>
-            </div>
+          <div className="px-5 py-2.5 bg-blue-50 border-t border-blue-200 flex items-center justify-end gap-2">
+            <div className={`w-2 h-2 rounded-full ${totalFilled === totalItems ? 'bg-green-500' : 'bg-amber-400'}`} />
+            <span className="text-xs text-gray-500">{totalFilled}/{totalItems} item checklist terisi</span>
           </div>
-        </div>
-
-        {/* SATU BORDER */}
-        <div className="bg-white rounded border-2 border-blue-400 overflow-hidden divide-y divide-blue-200">
 
           {/* BAGIAN 1 */}
           <div className="flex items-stretch" style={{ minHeight: '48px' }}>
@@ -305,6 +459,7 @@ export default function SKKPage() {
                   className="w-full border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition" />
               </div>
             </div>
+            <div className="h-3 bg-gray-100 border-y border-blue-200" />
           </div>
 
           <div className="h-3 bg-gray-100" />
@@ -532,13 +687,55 @@ export default function SKKPage() {
             </div>
           </div>
 
-
           {/* BAGIAN 5 — Kegiatan */}
           <div>
-            <div className="px-5 py-4 border-b flex items-center justify-between" style={{ backgroundColor: '#993366', borderColor: '#7a2952' }}>
+            <div className="px-5 py-4 border-b flex items-center justify-between flex-wrap gap-3" style={{ backgroundColor: '#993366', borderColor: '#7a2952' }}>
               <span className="font-bold text-xs tracking-wide uppercase whitespace-nowrap" style={{ color: '#ffffff' }}>Bagian 5 — Kegiatan</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm text-white mr-1">Pengukuran & monitoring gas:</span>
+                {(['ya', 'tidak'] as const).map((opt) => (
+                  <button 
+                    key={opt} 
+                    onClick={() => {
+                      if (opt === 'ya') {
+                        setGasMonitoring('ya');
+                      } else {
+                        setGasMonitoring('tidak');
+                        setGasRows([emptyGasRow()]);
+                        setDiukurOleh('');
+                      }
+                    }}
+                    className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${
+                      gasMonitoring === opt
+                        ? opt === 'ya' 
+                          ? 'bg-blue-600 border-blue-600 text-white' 
+                          : 'bg-red-500 border-red-500 text-white'
+                        : 'bg-white border-gray-200 text-gray-500 hover:border-blue-300'
+                    }`}
+                  >
+                    {opt === 'ya' 
+                      ? (sudahIsiGas ? '✓ Data Gas Terisi — Edit' : 'Ya — gunakan form kondisi gas') 
+                      : 'Tidak'}
+                  </button>
+                ))}
+              </div>
             </div>
+
             <div className="px-6 py-5 space-y-5">
+
+              {/* Formulir Pemeriksaan Kondisi Gas — muncul ketika toggle "Ya" dipilih */}
+              {gasMonitoring === 'ya' && (
+                <FormKondisiGas
+                  rows={gasRows}
+                  diukurOleh={diukurOleh}
+                  onDiukurOlehChange={setDiukurOleh}
+                  onRowChange={updateGasRow}
+                  onAddRow={addGasRow}
+                  onRemoveRow={removeGasRow}
+                />
+              )}
+
+              {/* Safety Notes */}
               <div>
                 <p className="text-xs font-bold text-gray-800 uppercase tracking-wide mb-3">
                   Hal-hal yang harus menjadi perhatian untuk keselamatan pekerjaan
@@ -560,26 +757,26 @@ export default function SKKPage() {
           </div>
 
           {/* DISTRIBUSI */}
-          <div className="flex border-t-2 border-blue-400">
+          <div className="flex">
             <div className="flex items-center px-5 py-3 shrink-0" style={{ backgroundColor: '#c8b89a', minWidth: '140px' }}>
               <span className="text-xs font-bold text-black uppercase tracking-widest">DISTRIBUSI:</span>
             </div>
-            <div className="flex-1 flex items-center justify-center px-5 py-3 border-l border-r border-blue-400">
+            <div className="flex-1 flex items-center justify-center px-5 py-3 border-l border-gray-300" style={{ backgroundColor: '#ffffff' }}>
               <span className="text-xs font-semibold text-black">Putih Sebagai Arsip Performing Authority (PA)</span>
             </div>
-            <div className="flex-1 flex items-center justify-center px-5 py-3 border-r border-blue-400" style={{ backgroundColor: '#92d050' }}>
+            <div className="flex-1 flex items-center justify-center px-5 py-3 border-l border-white/40" style={{ backgroundColor: '#92d050' }}>
               <span className="text-xs font-bold text-black">Hijau Sebagai Arsip HSE</span>
             </div>
-            <div className="flex-1 flex items-center justify-center px-5 py-3" style={{ backgroundColor: '#ffff00' }}>
+            <div className="flex-1 flex items-center justify-center px-5 py-3 border-l border-yellow-200" style={{ backgroundColor: '#ffff00' }}>
               <span className="text-xs font-bold text-black">Kuning Sebagai Arsip SIKA Controller</span>
             </div>
           </div>
 
-        </div>
+        </div>{/* akhir 1 border wrapper */}
 
         {/* FOOTER BUTTONS */}
         <div className="flex justify-end gap-3 py-2 pb-8">
-          <button onClick={() => router.push('/dashboard/pemohon/sika/pemeriksaan')}
+          <button onClick={() => router.push('/dashboard/pemohon/sika/new')}
             className="px-6 py-2 rounded bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition shadow-md shadow-red-200">
             Back
           </button>

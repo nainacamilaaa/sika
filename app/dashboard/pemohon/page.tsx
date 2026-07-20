@@ -2,16 +2,28 @@
 
 import { useAuthStore } from '@/store/authStore';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
-import { LogOut, Phone, Printer } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { LogOut, Phone, Printer, ChevronDown } from 'lucide-react';
 
 export default function DashboardPemohon() {
   const { user, isAuthenticated, logout } = useAuthStore();
   const router = useRouter();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isAuthenticated) router.push('/login');
   }, [isAuthenticated, router]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -22,32 +34,55 @@ export default function DashboardPemohon() {
 
   return (
     <div className="min-h-screen flex flex-col">
-
-      {/* ─── HEADER ─── */}
-        <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
-            <img
-              src="/logosika.svg"
-              alt="SIKA"
-              className="h-9 object-contain"
-            />
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="text-right">
-              <p className="text-sm font-medium text-gray-800">{user.name}</p>
-              <p className="text-xs text-gray-500">{user.jabatan}</p>
-            </div>
+      <header className="bg-white border-b border-gray-200 px-3 py-2 flex items-center justify-between">
+        <div className="flex items-center" style={{ paddingLeft: '40px' }}>
+          <div className="relative" ref={menuRef}>
             <button
-              onClick={handleLogout}
-              className="flex items-center gap-2 text-sm text-gray-500 hover:text-red-600 border border-gray-200 rounded-lg px-3 py-2 hover:border-red-200 transition"
+              onClick={() => setMenuOpen(v => !v)}
+              className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-gray-50 transition"
             >
-              <LogOut size={16} />
-              Logout
+              <div
+                className="flex items-center justify-center rounded-full text-white text-sm font-semibold"
+                style={{ width: 36, height: 36, backgroundColor: '#003DA5' }}
+              >
+                {user.name?.charAt(0).toUpperCase()}
+              </div>
+              <div className="text-left">
+                <p className="text-sm font-medium text-gray-800 leading-tight">{user.name}</p>
+                <p className="text-xs text-gray-500 leading-tight">{user.jabatan}</p>
+              </div>
+              <ChevronDown
+                size={16}
+                className={`text-gray-400 transition-transform ${menuOpen ? 'rotate-180' : ''}`}
+              />
             </button>
+            {menuOpen && (
+              <div className="absolute left-0 mt-2 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-20">
+                <button
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-600 hover:bg-red-50 hover:text-red-600 transition"
+                >
+                  <LogOut size={16} />
+                  Logout
+                </button>
+              </div>
+            )}
           </div>
-        </header>
-
-      {/* ─── HERO SECTION ─── */}
+        </div>
+        <div className="flex items-center gap-4">
+          <img
+            src="/logosika.svg"
+            alt="SIKA"
+            className="h-9 object-contain"
+          />
+          <div className="w-px h-8 bg-gray-200" />
+          <img
+            src="/logopertaminagasfull.svg"
+            alt="Pertamina Gas"
+            className="h-8 object-contain"
+          />
+        </div>
+      </header>
       <section
         style={{
           position: 'relative',
@@ -59,10 +94,7 @@ export default function DashboardPemohon() {
           backgroundRepeat: 'no-repeat',
         }}
       >
-        {/* Dark overlay */}
         <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)' }} />
-
-        {/* Hero content — perfectly centered */}
         <div style={{
           position: 'absolute',
           inset: 0,
@@ -83,8 +115,6 @@ export default function DashboardPemohon() {
           <p className="text-white" style={{ fontSize: '1.50rem', opacity: 0.92, marginBottom: '24px' }}>
             Kelola pengajuan pekerjaan Anda di sini.
           </p>
-
-          {/* Buttons — always row */}
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '20px', flexWrap: 'wrap', justifyContent: 'center' }}>
             <button
               onClick={() => router.push('/dashboard/pemohon/program/new')}
@@ -134,13 +164,11 @@ export default function DashboardPemohon() {
         </div>
       </section>
 
-      {/* ─── FOOTER ─── */}
+      {/* Aksen garis atas footer */}
+      <div style={{ height: '3px', background: 'linear-gradient(90deg, #1a56b0 0%, #eab308 50%, #1a56b0 100%)' }} />
+
       <footer style={{ backgroundColor: '#1a56b0' }}>
-
-        {/* Main footer — konten kiri + logo box kanan */}
         <div style={{ display: 'flex', alignItems: 'stretch' }}>
-
-          {/* Kiri — semua konten footer */}
           <div
             style={{
               flex: 1,
@@ -151,7 +179,6 @@ export default function DashboardPemohon() {
               alignItems: 'start',
             }}
           >
-            {/* Kantor Pusat */}
             <div>
               <p style={{ fontWeight: 700, color: '#fff', fontSize: '0.9rem', margin: '0 0 10px' }}>
                 Kantor Pusat
@@ -163,8 +190,6 @@ export default function DashboardPemohon() {
                 Jakarta Pusat 10110
               </p>
             </div>
-
-            {/* Kontak */}
             <div>
               <p style={{ fontWeight: 700, color: '#fff', fontSize: '0.9rem', margin: '0 0 14px' }}>
                 Kontak
@@ -178,8 +203,6 @@ export default function DashboardPemohon() {
                 <span>+62 21 31906831</span>
               </div>
             </div>
-
-            {/* Informasi */}
             <div>
               <p style={{ fontWeight: 700, color: '#fff', fontSize: '0.9rem', margin: '0 0 14px' }}>
                 Informasi
@@ -193,8 +216,6 @@ export default function DashboardPemohon() {
                 </a>
               ))}
             </div>
-
-            {/* Layanan */}
             <div>
               <p style={{ fontWeight: 700, color: '#fff', fontSize: '0.9rem', margin: '0 0 14px' }}>
                 Layanan
@@ -208,8 +229,6 @@ export default function DashboardPemohon() {
                 </a>
               ))}
             </div>
-
-            {/* Dukungan */}
             <div>
               <p style={{ fontWeight: 700, color: '#fff', fontSize: '0.9rem', margin: '0 0 14px' }}>
                 Dukungan
@@ -228,8 +247,6 @@ export default function DashboardPemohon() {
               ))}
             </div>
           </div>
-
-          {/* Kanan — kotak logo */}
           <div
             style={{
               backgroundColor: '#005FA2',
@@ -250,25 +267,19 @@ export default function DashboardPemohon() {
                 if (fb) fb.style.display = 'flex';
               }}
             />
-            {/* Fallback */}
             <div style={{ display: 'none', flexDirection: 'column', alignItems: 'center', gap: '8px', color: '#fff' }}>
               <span style={{ fontWeight: 900, fontSize: '1.5rem', letterSpacing: 2 }}>PG</span>
               <span style={{ fontWeight: 700, fontSize: '0.85rem', letterSpacing: 1, textAlign: 'center' }}>PERTAMINA GAS</span>
             </div>
           </div>
-
         </div>
-
-        {/* Divider */}
         <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)' }} />
-
-        {/* Bottom bar */}
         <div style={{ padding: '14px 40px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <p style={{ color: '#bfdbfe', fontSize: '0.76rem', margin: 0 }}>
             © {new Date().getFullYear()} PT Pertamina Gas. Hak Cipta Dilindungi.
           </p>
           <p style={{ color: '#bfdbfe', fontSize: '0.76rem', margin: 0 }}>
-            SIKA — Sistem Informasi Kerja
+            Sistem Izin Kerja (SIKA) - HSSE 
           </p>
         </div>
       </footer>

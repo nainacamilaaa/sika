@@ -14,6 +14,8 @@ interface ProgramData {
   satKerjaPenanggung: string;
   fungsiIA: string;
   picPenanggungList: string[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 interface JSARow {
@@ -95,6 +97,14 @@ interface SikaBasicData {
   pekerjaList: string[];
   noSIKA: string;
   tanggalSIKA: string;
+  tanggalTerbit: string[];
+  berlakuHingga: string[];
+  jamKerjaMulai: string;
+  jamKerjaSelesai: string;
+  waktuIsolasi: string;
+  noSikaAreaFungsi: string;
+  noSikaNomorUrut: string;
+  lanjutanDariSika: string;
 }
 
 interface SikaPemeriksaanData {
@@ -106,6 +116,8 @@ interface SikaPemeriksaanData {
   permintaanTambahan: string;
   sertifikat: string[];
   sifatPekerjaan: string;
+  diisiPA: boolean;
+  diperiksaIA: boolean;
 }
 
 type SikaData = SikaBasicData & SikaPemeriksaanData;
@@ -115,6 +127,25 @@ interface SertifikatData {
   data: Record<string, any>;
   diisiOleh: string;
   diisiPada: string;
+}
+
+interface GasMonitoringRow {
+  id: number;
+  time: string;
+  lel: string;
+  o2: string;
+  h2s: string;
+  co2: string;
+  co: string;
+  temp: string;
+  sign: string;
+  remark: string;
+}
+
+interface GasMonitoringData {
+  tanggal: string;
+  diukurOleh: string;
+  rows: GasMonitoringRow[];
 }
 
 interface WorkPermitData {
@@ -131,12 +162,31 @@ interface WorkPermitData {
 
 type JSAStatus = 'draft' | 'request_review' | 'request_approval' | 'approved' | 'rejected';
 type SIKAStatus = 'draft' | 'request' | 'approved' | 'rejected';
-
 type ApprovalStatus = 'draft' | 'request' | 'waiting' | 'approved' | 'rejected';
+
+// Status pengajuan perpanjangan SIKA/JSA yang diajukan pemohon ke Pemberi Kerja.
+// 'none'     -> tidak ada pengajuan perpanjangan yang berjalan
+// 'diajukan' -> menunggu keputusan PJA
+// 'ditolak'  -> PJA menolak, pemohon boleh mengajukan ulang
+// (saat disetujui, statusnya dikembalikan ke 'none' dan tanggal berlaku SIKA langsung diperbarui)
+type PerpanjanganStatus = 'none' | 'diajukan' | 'ditolak';
+
+interface RiwayatPerpanjangan {
+  id: string;
+  tanggalLama: string;
+  tanggalBaru: string;
+  alasan: string;
+  diajukanOleh: string;
+  diajukanPada: string;
+  status: 'disetujui' | 'ditolak';
+  diputuskanOleh?: string;
+  diputuskanPada?: string;
+  alasanTolak?: string;
+}
 
 interface ApprovalLogEntry {
   id: string;
-  dokumen: 'sika' | 'jsa';
+  dokumen: 'sika' | 'jsa' | 'perpanjangan';
   aksi: 'approve' | 'reject' | 'ajukan_ulang';
   oleh: string;
   peran: 'pemberi' | 'pja' | 'pemohon';
@@ -153,6 +203,14 @@ const defaultSika: SikaData = {
   pekerjaList: [],
   noSIKA: '',
   tanggalSIKA: '',
+  tanggalTerbit: Array(6).fill(''),
+  berlakuHingga: Array(6).fill(''),
+  jamKerjaMulai: '',
+  jamKerjaSelesai: '',
+  waktuIsolasi: '',
+  noSikaAreaFungsi: '',
+  noSikaNomorUrut: '',
+  lanjutanDariSika: '',
   isolasi: [],
   lampiran: [],
   identifikasi: [],
@@ -161,6 +219,8 @@ const defaultSika: SikaData = {
   permintaanTambahan: '',
   sertifikat: [],
   sifatPekerjaan: '',
+  diisiPA: false,
+  diperiksaIA: false,
 };
 
 const makeLogEntry = (
@@ -170,6 +230,29 @@ const makeLogEntry = (
   id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   timestamp: new Date().toISOString(),
 });
+
+// Tanggal berakhir SIKA disimpan sebagai array (berlakuHingga, selaras index dengan
+// tanggalTerbit). Ambil entri terisi terakhir sebagai tanggal berakhir yang berlaku saat ini.
+const ambilTanggalBerakhirTerkini = (berlakuHingga: string[]): string => {
+  const terisi = berlakuHingga.filter((v) => !!v);
+  return terisi.length > 0 ? terisi[terisi.length - 1] : '';
+};
+
+// Saat perpanjangan disetujui, ganti entri "berlaku hingga" terakhir dengan tanggal baru.
+// Kalau belum ada entri terisi sama sekali, isi ke slot pertama.
+const terapkanTanggalBerakhirBaru = (berlakuHingga: string[], tanggalBaru: string): string[] => {
+  const next = [...berlakuHingga];
+  let idxTerakhirTerisi = -1;
+  next.forEach((v, i) => {
+    if (v) idxTerakhirTerisi = i;
+  });
+  if (idxTerakhirTerisi === -1) {
+    next[0] = tanggalBaru;
+  } else {
+    next[idxTerakhirTerisi] = tanggalBaru;
+  }
+  return next;
+};
 
 interface ProgramStore {
   program: ProgramData | null;
@@ -197,9 +280,18 @@ interface ProgramStore {
   alasanTolakSikaPJA: string | null;
   alasanTolakJsaPJA: string | null;
 
-  approvalHistory: ApprovalLogEntry[];
+  // --- Perpanjangan SIKA/JSA ---
+  statusPerpanjangan: PerpanjanganStatus;
+  tanggalKontrakBaruPerpanjangan: string | null;
+  alasanPerpanjangan: string | null;
+  alasanTolakPerpanjangan: string | null;
+  diajukanPerpanjanganOleh: string | null;
+  diajukanPerpanjanganPada: string | null;
+  riwayatPerpanjangan: RiwayatPerpanjangan[];
 
+  approvalHistory: ApprovalLogEntry[];
   sertifikatData: Record<string, SertifikatData>;
+  gasMonitoringData: Record<string, GasMonitoringData>;
 
   setProgram: (data: ProgramData) => void;
   setJSA: (data: JSAData) => void;
@@ -222,10 +314,12 @@ interface ProgramStore {
   unmarkSertifikat: (nama: string) => void;
   setSertifikatData: (nama: string, data: Record<string, any>, diisiOleh: string) => void;
   removeSertifikatData: (nama: string) => void;
+  setGasMonitoringData: (key: string, data: GasMonitoringData) => void;
+  removeGasMonitoringData: (key: string) => void;
 
+  submitToPemberi: (oleh: string) => void;
   ajukanUlangSika: (oleh: string) => void;
   ajukanUlangJsa: (oleh: string) => void;
-  submitToPemberi: (oleh: string) => void;
 
   approveSikaPemberi: (oleh: string) => void;
   rejectSikaPemberi: (oleh: string, alasan: string) => void;
@@ -236,6 +330,11 @@ interface ProgramStore {
   rejectSikaPJA: (oleh: string, alasan: string) => void;
   approveJsaPJA: (oleh: string) => void;
   rejectJsaPJA: (oleh: string, alasan: string) => void;
+
+  // --- Aksi perpanjangan ---
+  ajukanPerpanjangan: (oleh: string, tanggalKontrakBaru: string, alasan: string) => void;
+  approvePerpanjangan: (oleh: string) => void;
+  rejectPerpanjangan: (oleh: string, alasan: string) => void;
 
   reset: () => void;
 }
@@ -268,11 +367,30 @@ export const useProgramStore = create<ProgramStore>()(
       alasanTolakSikaPJA: null,
       alasanTolakJsaPJA: null,
 
+      statusPerpanjangan: 'none',
+      tanggalKontrakBaruPerpanjangan: null,
+      alasanPerpanjangan: null,
+      alasanTolakPerpanjangan: null,
+      diajukanPerpanjanganOleh: null,
+      diajukanPerpanjanganPada: null,
+      riwayatPerpanjangan: [],
+
       approvalHistory: [],
-
       sertifikatData: {},
+      gasMonitoringData: {},
 
-      setProgram: (data) => set({ program: data }),
+      // NOTE: createdAt/updatedAt kini diisi otomatis di sini, bukan dari caller.
+      // - createdAt: dipertahankan dari state sebelumnya kalau sudah ada (diisi sekali saat program pertama kali dibuat)
+      // - updatedAt: selalu diperbarui setiap kali setProgram dipanggil
+      setProgram: (data) =>
+        set((state) => ({
+          program: {
+            ...data,
+            createdAt: state.program?.createdAt ?? new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        })),
+
       setJSA: (data) => set({ jsa: data }),
       setSika: (data) => set({ sika: data }),
 
@@ -374,6 +492,18 @@ export const useProgramStore = create<ProgramStore>()(
           const next = { ...state.sertifikatData };
           delete next[nama];
           return { sertifikatData: next };
+        }),
+
+      setGasMonitoringData: (key, data) =>
+        set((state) => ({
+          gasMonitoringData: { ...state.gasMonitoringData, [key]: data },
+        })),
+
+      removeGasMonitoringData: (key) =>
+        set((state) => {
+          const next = { ...state.gasMonitoringData };
+          delete next[key];
+          return { gasMonitoringData: next };
         }),
 
       submitToPemberi: (oleh) =>
@@ -518,6 +648,86 @@ export const useProgramStore = create<ProgramStore>()(
         });
       },
 
+      // Pemohon mengajukan perpanjangan (dipanggil dari halaman monitoring, H-2 sebelum berakhir)
+      ajukanPerpanjangan: (oleh, tanggalKontrakBaru, alasan) => {
+        const state = get();
+        if (state.statusPerpanjangan === 'diajukan') return;
+        set({
+          statusPerpanjangan: 'diajukan',
+          tanggalKontrakBaruPerpanjangan: tanggalKontrakBaru,
+          alasanPerpanjangan: alasan,
+          alasanTolakPerpanjangan: null,
+          diajukanPerpanjanganOleh: oleh,
+          diajukanPerpanjanganPada: new Date().toISOString(),
+          approvalHistory: [
+            ...state.approvalHistory,
+            makeLogEntry({ dokumen: 'perpanjangan', aksi: 'ajukan_ulang', oleh, peran: 'pemohon', alasan }),
+          ],
+        });
+      },
+
+      // Pemberi Kerja menyetujui: tanggal berlaku SIKA diperbarui, status kembali normal (aktif)
+      approvePerpanjangan: (oleh) => {
+        const state = get();
+        if (state.statusPerpanjangan !== 'diajukan') return;
+        const tanggalLama = state.sika ? ambilTanggalBerakhirTerkini(state.sika.berlakuHingga) : '';
+        const tanggalBaru = state.tanggalKontrakBaruPerpanjangan ?? '';
+        const riwayat: RiwayatPerpanjangan = {
+          id: `perpanjangan-${Date.now()}`,
+          tanggalLama,
+          tanggalBaru,
+          alasan: state.alasanPerpanjangan ?? '',
+          diajukanOleh: state.diajukanPerpanjanganOleh ?? '',
+          diajukanPada: state.diajukanPerpanjanganPada ?? '',
+          status: 'disetujui',
+          diputuskanOleh: oleh,
+          diputuskanPada: new Date().toISOString(),
+        };
+        set({
+          statusPerpanjangan: 'none',
+          sika: state.sika && tanggalBaru
+            ? { ...state.sika, berlakuHingga: terapkanTanggalBerakhirBaru(state.sika.berlakuHingga, tanggalBaru) }
+            : state.sika,
+          tanggalKontrakBaruPerpanjangan: null,
+          alasanPerpanjangan: null,
+          alasanTolakPerpanjangan: null,
+          diajukanPerpanjanganOleh: null,
+          diajukanPerpanjanganPada: null,
+          riwayatPerpanjangan: [...state.riwayatPerpanjangan, riwayat],
+          approvalHistory: [
+            ...state.approvalHistory,
+            makeLogEntry({ dokumen: 'perpanjangan', aksi: 'approve', oleh, peran: 'pemberi' }),
+          ],
+        });
+      },
+
+      // Pemberi Kerja menolak: pemohon bisa mengajukan ulang dari halaman monitoring
+      rejectPerpanjangan: (oleh, alasan) => {
+        const state = get();
+        if (state.statusPerpanjangan !== 'diajukan') return;
+        const riwayat: RiwayatPerpanjangan = {
+          id: `perpanjangan-${Date.now()}`,
+          tanggalLama: state.sika ? ambilTanggalBerakhirTerkini(state.sika.berlakuHingga) : '',
+          tanggalBaru: state.tanggalKontrakBaruPerpanjangan ?? '',
+          alasan: state.alasanPerpanjangan ?? '',
+          diajukanOleh: state.diajukanPerpanjanganOleh ?? '',
+          diajukanPada: state.diajukanPerpanjanganPada ?? '',
+          status: 'ditolak',
+          diputuskanOleh: oleh,
+          diputuskanPada: new Date().toISOString(),
+          alasanTolak: alasan,
+        };
+        set({
+          statusPerpanjangan: 'ditolak',
+          alasanTolakPerpanjangan: alasan,
+          riwayatPerpanjangan: [...state.riwayatPerpanjangan, riwayat],
+          approvalHistory: [
+            ...state.approvalHistory,
+            makeLogEntry({ dokumen: 'perpanjangan', aksi: 'reject', oleh, peran: 'pemberi', alasan }),
+          ],
+        });
+      },
+
       reset: () =>
         set({
           program: null,
@@ -542,8 +752,16 @@ export const useProgramStore = create<ProgramStore>()(
           jsaStatusPJA: 'draft',
           alasanTolakSikaPJA: null,
           alasanTolakJsaPJA: null,
+          statusPerpanjangan: 'none',
+          tanggalKontrakBaruPerpanjangan: null,
+          alasanPerpanjangan: null,
+          alasanTolakPerpanjangan: null,
+          diajukanPerpanjanganOleh: null,
+          diajukanPerpanjanganPada: null,
+          riwayatPerpanjangan: [],
           approvalHistory: [],
           sertifikatData: {},
+          gasMonitoringData: {},
         }),
     }),
     { name: 'sika-program' }
@@ -567,4 +785,8 @@ export type {
   ApprovalStatus,
   ApprovalLogEntry,
   SertifikatData,
+  GasMonitoringData,
+  GasMonitoringRow,
+  PerpanjanganStatus,
+  RiwayatPerpanjangan,
 };

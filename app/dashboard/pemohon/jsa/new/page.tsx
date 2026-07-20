@@ -88,13 +88,24 @@ export default function DetailJSAPage() {
     else if (!sika) router.replace('/dashboard/pemohon/sika/new');
   }, [program, sika]);
 
+  // No. SIKA is not typed manually here anymore — it's derived from the
+  // "NOMOR SIKA" fields (Area/Fungsi + Nomor Urut) filled in on the SIKA
+  // form, so both pages always show the same number.
+  const nomorSikaGabungan =
+    sika?.noSikaAreaFungsi || sika?.noSikaNomorUrut
+      ? `${sika?.noSikaAreaFungsi || '-'}-${sika?.noSikaNomorUrut || '-'}`
+      : '';
+
+  // Judul Pekerjaan and Lokasi are likewise derived — from "Judul Kontrak
+  // Kerja" (namaPaket) and "Lokasi Kerja" (lokasiKerja) on the Program form —
+  // so they always stay in sync with what was entered there.
+  const judulPekerjaanDariProgram = program?.namaPaket ?? '';
+  const lokasiDariProgram = program?.lokasiKerja ?? '';
+
   const [meta, setMeta] = useState({
-    judulPekerjaan: jsa?.judulPekerjaan ?? '',
     tanggal: jsa?.tanggalJSA ?? '',
-    lokasi: jsa?.lokasi ?? '',
     halaman: jsa?.halaman ?? '1',
     totalHalaman: jsa?.totalHalaman ?? '1',
-    noSIKA: jsa?.jsaNo ?? '',
     status: (jsa?.status ?? 'baru') as 'baru' | 'revisi',
   });
 
@@ -157,9 +168,9 @@ export default function DetailJSAPage() {
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
-    if (!meta.judulPekerjaan.trim()) newErrors.judulPekerjaan = 'Judul pekerjaan wajib diisi';
+    if (!judulPekerjaanDariProgram.trim()) newErrors.judulPekerjaan = 'Judul Kontrak Kerja belum diisi di form Program';
     if (!meta.tanggal) newErrors.tanggal = 'Tanggal wajib diisi';
-    if (!meta.lokasi.trim()) newErrors.lokasi = 'Lokasi wajib diisi';
+    if (!lokasiDariProgram.trim()) newErrors.lokasi = 'Lokasi Kerja belum diisi di form Program';
     const hasLangkah = sections.some((sec) => sec.rows.some((row) => row.langkah.trim() !== ''));
     if (!hasLangkah) newErrors.sections = 'Minimal satu langkah pekerjaan wajib diisi';
     setErrors(newErrors);
@@ -167,13 +178,13 @@ export default function DetailJSAPage() {
   };
 
   const buildJSAData = () => ({
-    jsaNo: meta.noSIKA,
+    jsaNo: nomorSikaGabungan,
     kontraktor: jsa?.kontraktor ?? '',
-    lokasi: meta.lokasi,
+    lokasi: lokasiDariProgram,
     tanggalJSA: meta.tanggal,
-    namaJSA: meta.judulPekerjaan,
+    namaJSA: judulPekerjaanDariProgram,
     dokumen: jsa?.dokumen ?? [],
-    judulPekerjaan: meta.judulPekerjaan,
+    judulPekerjaan: judulPekerjaanDariProgram,
     halaman: meta.halaman,
     totalHalaman: meta.totalHalaman,
     status: meta.status,
@@ -215,6 +226,13 @@ export default function DetailJSAPage() {
         : 'border-gray-300 focus:ring-blue-400'
     }`;
 
+  const steps = [
+    { label: 'Program', active: false },
+    { label: 'Pengisian SIKA', active: false },
+    { label: 'Pengisian JSA', active: true },
+    { label: 'Detail Program', active: false },
+  ];
+
   return (
     <div className="min-h-screen bg-gray-100">
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
@@ -229,27 +247,34 @@ export default function DetailJSAPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-0">
-          {[
-            { label: 'Program', active: false },
-            { label: 'Pengisian SIKA', active: false },
-            { label: 'Pengisian JSA', active: true },
-            { label: 'Detail Program', active: false },
-          ].map((step, i, arr) => (
-            <div key={step.label} className="flex items-center">
-              <div className="flex items-center gap-2 px-3">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                  step.active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'
-                }`}>
-                  {i + 1}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-0">
+            {steps.map((step, i, arr) => (
+              <div key={step.label} className="flex items-center">
+                <div className="flex items-center gap-2 px-2">
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                    step.active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'
+                  }`}>
+                    {i + 1}
+                  </div>
+                  <span className={`text-xs font-medium ${step.active ? 'text-blue-600' : 'text-gray-400'}`}>
+                    {step.label}
+                  </span>
                 </div>
-                <span className={`text-xs font-medium ${step.active ? 'text-blue-600' : 'text-gray-400'}`}>
-                  {step.label}
-                </span>
+                {i < arr.length - 1 && <div className="w-6 h-px bg-gray-200" />}
               </div>
-              {i < arr.length - 1 && <div className="w-8 h-px bg-gray-200" />}
-            </div>
-          ))}
+            ))}
+          </div>
+
+          <div className="w-px h-8 bg-gray-200" />
+
+          <div className="flex items-center gap-2" style={{ paddingRight: '1px' }}>
+            <img
+              src="/logopertaminagasfull.svg"
+              alt="Pertamina Gas"
+              className="h-8 object-contain"
+            />
+          </div>
         </div>
       </div>
 
@@ -288,10 +313,12 @@ export default function DetailJSAPage() {
                     <div>
                       <input
                         type="text"
-                        value={meta.judulPekerjaan}
-                        onChange={(e) => handleMetaChange('judulPekerjaan', e.target.value)}
-                        placeholder="Masukkan judul pekerjaan"
-                        className={metaInputClass('judulPekerjaan')}
+                        value={judulPekerjaanDariProgram}
+                        readOnly
+                        disabled
+                        placeholder="Belum diisi di form Program"
+                        title="Diambil otomatis dari Judul Kontrak Kerja pada form Program"
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-500 bg-gray-50 placeholder-gray-400 cursor-not-allowed"
                       />
                       {errors.judulPekerjaan && (
                         <p className="text-red-500 text-xs mt-1">{errors.judulPekerjaan}</p>
@@ -326,10 +353,12 @@ export default function DetailJSAPage() {
                     <div>
                       <input
                         type="text"
-                        value={meta.lokasi}
-                        onChange={(e) => handleMetaChange('lokasi', e.target.value)}
-                        placeholder="Masukkan lokasi kerja"
-                        className={metaInputClass('lokasi')}
+                        value={lokasiDariProgram}
+                        readOnly
+                        disabled
+                        placeholder="Belum diisi di form Program"
+                        title="Diambil otomatis dari Lokasi Kerja pada form Program"
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-500 bg-gray-50 placeholder-gray-400 cursor-not-allowed"
                       />
                       {errors.lokasi && (
                         <p className="text-red-500 text-xs mt-1">{errors.lokasi}</p>
@@ -365,10 +394,12 @@ export default function DetailJSAPage() {
                   <td className="py-1 pr-10">
                     <input
                       type="text"
-                      value={meta.noSIKA}
-                      onChange={(e) => handleMetaChange('noSIKA', e.target.value)}
-                      placeholder="Masukkan No. SIKA"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder-gray-400"
+                      value={nomorSikaGabungan}
+                      readOnly
+                      disabled
+                      placeholder="Belum diisi di form SIKA"
+                      title="Diambil otomatis dari Nomor SIKA pada form Pengisian SIKA"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-500 bg-gray-50 placeholder-gray-400 cursor-not-allowed"
                     />
                   </td>
                   <td />
@@ -506,10 +537,18 @@ export default function DetailJSAPage() {
                         <td className={`border border-gray-200 px-3 py-2.5 text-gray-700 text-xs font-medium ${item.label === 'Others :' ? 'underline' : ''}`}>
                           {item.label}
                         </td>
-                        <td className="border border-gray-200 w-10 text-center cursor-pointer select-none transition" onClick={() => togglePPE(ri, ci)} style={{ background: item.checked ? '#eff6ff' : undefined }}>
-                          {item.checked
-                            ? <span style={{ color: '#1d4ed8', fontSize: '16px', fontWeight: 700 }}>✓</span>
-                            : <span style={{ color: '#cbd5e1', fontSize: '16px' }}>□</span>}
+                        <td
+                          className="border border-gray-200 w-10 text-center select-none transition"
+                          style={{ background: item.checked ? '#eff6ff' : undefined }}
+                        >
+                          <label className="flex items-center justify-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={item.checked}
+                              onChange={() => togglePPE(ri, ci)}
+                              className="w-3.5 h-3.5 shrink-0 accent-blue-600 cursor-pointer"
+                            />
+                          </label>
                         </td>
                       </Fragment>
                     ))}
@@ -524,7 +563,7 @@ export default function DetailJSAPage() {
 
           <div className="flex justify-end gap-3 py-6 px-8 border-t border-gray-100">
             <button
-              onClick={() => router.push('/dashboard/pemohon/sika/pemeriksaan')}
+              onClick={() => router.push('/dashboard/pemohon/sika/new')}
               className="px-6 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition shadow-md shadow-red-200"
             >
               Back

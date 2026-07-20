@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useProgramStore } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
-import { Users, Lock } from 'lucide-react';
+import { Users, Lock, Paperclip, X, FileText, Plus, Trash2 } from 'lucide-react';
+import { buildChecklist } from '@/lib/sertifikatUtils';
 
 const checklistItems = [
   'Apakah pekerja sudah diberi penjelasan secara detail mengenai pekerjaan yang akan dilakukan',
@@ -41,6 +42,30 @@ const safetyNotes = [
   'Bila pekerjaan panas dilakukan pada ketinggian, pastikan fasilitas yang berpotensi terkena percikan di tutup dengan cover terutma untuk fasilitas yang dimungkinkan terjadi bocoran.',
   'Pastikan semua anggota memahami tindakan dalam keadaan darurat, termasuk No. telepon dan/atau petugas yang bisa dihubungi.',
 ];
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const ACCEPTED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'application/pdf'];
+
+type UploadedDoc = {
+  file: File;
+  previewUrl: string | null;
+};
+
+type GasRow = {
+  time: string;
+  lel: string;
+  o2: string;
+  h2s: string;
+  co2: string;
+  co: string;
+  temp: string;
+  sign: string;
+  remark: string;
+};
+
+const emptyGasRow = (): GasRow => ({
+  time: '', lel: '', o2: '', h2s: '', co2: '', co: '', temp: '', sign: '', remark: '',
+});
 
 function ReadOnlyField({ label, value, multiline = false }: { label: string; value: string; multiline?: boolean }) {
   return (
@@ -116,10 +141,218 @@ function VerifikasiPanel({
   );
 }
 
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function DocUploadCell({
+  index,
+  doc,
+  error,
+  onSelect,
+  onRemove,
+}: {
+  index: number;
+  doc: UploadedDoc | null;
+  error: string | null;
+  onSelect: (file: File) => void;
+  onRemove: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) onSelect(file);
+    e.target.value = '';
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-1 min-w-[120px]">
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,image/*,application/pdf"
+        onChange={handleFile}
+        className="hidden"
+        id={`doc-upload-${index}`}
+      />
+
+      {!doc ? (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="flex items-center gap-1.5 border border-dashed border-blue-300 text-blue-500 rounded px-2.5 py-1.5 text-sm hover:bg-blue-50 hover:border-blue-400 transition"
+        >
+          <Paperclip size={12} />
+          Upload
+        </button>
+      ) : (
+        <div className="flex items-center gap-1.5 bg-blue-50 border border-blue-200 rounded px-2 py-1.5 max-w-[160px]">
+          {doc.previewUrl ? (
+            <img src={doc.previewUrl} alt={doc.file.name} className="w-7 h-7 object-cover rounded shrink-0" />
+          ) : (
+            <FileText size={16} className="text-blue-500 shrink-0" />
+          )}
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm text-gray-800 truncate" title={doc.file.name}>{doc.file.name}</span>
+            <span className="text-sm text-gray-400">{formatFileSize(doc.file.size)}</span>
+          </div>
+          <button
+            type="button"
+            onClick={onRemove}
+            className="shrink-0 text-gray-400 hover:text-red-500 transition"
+            title="Hapus file"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <span className="text-sm text-red-500 text-center leading-tight">{error}</span>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// Formulir Pemeriksaan Kondisi Gas (Inline)
+// ═══════════════════════════════════════════════════════════
+function FormKondisiGas({
+  rows,
+  diukurOleh,
+  onDiukurOlehChange,
+  onRowChange,
+  onAddRow,
+  onRemoveRow,
+}: {
+  rows: GasRow[];
+  diukurOleh: string;
+  onDiukurOlehChange: (val: string) => void;
+  onRowChange: (index: number, field: keyof GasRow, value: string) => void;
+  onAddRow: () => void;
+  onRemoveRow: (index: number) => void;
+}) {
+  const inputCls =
+    'w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900 text-center focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition';
+
+  return (
+    <div className="rounded border-2 border-blue-300 overflow-hidden bg-white">
+      <div className="bg-blue-50 border-b border-blue-200 px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <p className="text-sm font-bold text-blue-700 uppercase tracking-wide">Formulir Pemeriksaan Kondisi Gas</p>
+          <p className="text-xs text-blue-400">Nomor Sika & Lokasi Kerja mengikuti data di atas</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600 whitespace-nowrap">Di ukur oleh:</label>
+          <input
+            type="text"
+            value={diukurOleh}
+            onChange={(e) => onDiukurOlehChange(e.target.value)}
+            placeholder="Nama petugas..."
+            className="border border-gray-200 rounded px-3 py-1.5 text-sm text-gray-900 w-52 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition"
+          />
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse min-w-[900px]">
+          <thead>
+            <tr className="bg-blue-100">
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold w-10">No</th>
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold w-24">Time</th>
+              <th colSpan={5} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold">Gas</th>
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold w-20">Temp °C</th>
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold w-24">Sign</th>
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold min-w-[140px]">Remark</th>
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 w-10"></th>
+            </tr>
+            <tr className="bg-blue-100">
+              <th className="border border-blue-200 px-2 py-1.5 text-blue-600 font-medium w-20">LEL %</th>
+              <th className="border border-blue-200 px-2 py-1.5 text-blue-600 font-medium w-20">O2 %</th>
+              <th className="border border-blue-200 px-2 py-1.5 text-blue-600 font-medium w-24">H2S ppm</th>
+              <th className="border border-blue-200 px-2 py-1.5 text-blue-600 font-medium w-24">CO2 ppm</th>
+              <th className="border border-blue-200 px-2 py-1.5 text-blue-600 font-medium w-24">CO ppm</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                <td className="border border-gray-100 px-2 py-1.5 text-center text-gray-500 font-mono">
+                  {String(index + 1).padStart(2, '0')}
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="time" value={row.time} onChange={(e) => onRowChange(index, 'time', e.target.value)} className={inputCls} />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.lel} onChange={(e) => onRowChange(index, 'lel', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.o2} onChange={(e) => onRowChange(index, 'o2', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.h2s} onChange={(e) => onRowChange(index, 'h2s', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.co2} onChange={(e) => onRowChange(index, 'co2', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.co} onChange={(e) => onRowChange(index, 'co', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.temp} onChange={(e) => onRowChange(index, 'temp', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.sign} onChange={(e) => onRowChange(index, 'sign', e.target.value)} className={inputCls} placeholder="..." />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input
+                    type="text"
+                    value={row.remark}
+                    onChange={(e) => onRowChange(index, 'remark', e.target.value)}
+                    className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition"
+                    placeholder="Catatan..."
+                  />
+                </td>
+                <td className="border border-gray-100 px-1 py-1.5 text-center">
+                  <button
+                    type="button"
+                    onClick={() => onRemoveRow(index)}
+                    disabled={rows.length === 1}
+                    className={`transition ${rows.length === 1 ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-red-500'}`}
+                    title="Hapus baris"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="px-4 py-3 border-t border-blue-100 bg-gray-50">
+        <button
+          type="button"
+          onClick={onAddRow}
+          className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium transition"
+        >
+          <Plus size={14} />
+          Tambah Baris
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function SKPPage() {
   const router = useRouter();
-  const { sika, markSertifikatFilled } = useProgramStore();
+  const { sika, markSertifikatFilled, setSertifikatData } = useProgramStore();
   const { user } = useAuthStore();
+
+  const NAMA = 'Sertifikat Kerja Panas (SKP)';
 
   const canEditPA = user?.role === 'pemberi';
   const canEditIA = user?.role === 'pja';
@@ -127,6 +360,12 @@ export default function SKPPage() {
   const [checklist, setChecklist] = useState<Record<number, 'yes' | 'no' | null>>(
     Object.fromEntries(checklistItems.map((_, i) => [i, null]))
   );
+
+  const [checklistDocs, setChecklistDocs] = useState<Record<number, UploadedDoc | null>>(
+    Object.fromEntries(checklistItems.map((_, i) => [i, null]))
+  );
+  const [docErrors, setDocErrors] = useState<Record<number, string | null>>({});
+
   const [diisiOlehIA, setDiisiOlehIA] = useState(false);
   const [tanggalTerbit, setTanggalTerbit] = useState('');
   const [jamMulai, setJamMulai] = useState('');
@@ -137,17 +376,89 @@ export default function SKPPage() {
   });
   const [gasMonitoring, setGasMonitoring] = useState<'ya' | 'tidak' | null>(null);
 
+  // Data Formulir Pemeriksaan Kondisi Gas (muncul saat gasMonitoring === 'ya')
+  const [gasRows, setGasRows] = useState<GasRow[]>([emptyGasRow()]);
+  const [diukurOleh, setDiukurOleh] = useState('');
+
+  const updateGasRow = (index: number, field: keyof GasRow, value: string) => {
+    setGasRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
+  };
+
+  const addGasRow = () => setGasRows((prev) => [...prev, emptyGasRow()]);
+
+  const removeGasRow = (index: number) => {
+    setGasRows((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
+  };
+
   const toggleChecklist = (index: number, val: 'yes' | 'no') => {
     setChecklist((prev) => ({ ...prev, [index]: prev[index] === val ? null : val }));
   };
 
+  const handleDocSelect = (index: number, file: File) => {
+    if (!ACCEPTED_TYPES.includes(file.type) && !/\.(jpe?g|png|webp|heic|pdf)$/i.test(file.name)) {
+      setDocErrors((prev) => ({ ...prev, [index]: 'Format harus foto atau PDF' }));
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      setDocErrors((prev) => ({ ...prev, [index]: 'Ukuran file maks 10MB' }));
+      return;
+    }
+
+    setDocErrors((prev) => ({ ...prev, [index]: null }));
+
+    setChecklistDocs((prev) => {
+      const old = prev[index];
+      if (old?.previewUrl) URL.revokeObjectURL(old.previewUrl);
+      const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
+      return { ...prev, [index]: { file, previewUrl } };
+    });
+  };
+
+  const handleDocRemove = (index: number) => {
+    setChecklistDocs((prev) => {
+      const old = prev[index];
+      if (old?.previewUrl) URL.revokeObjectURL(old.previewUrl);
+      return { ...prev, [index]: null };
+    });
+    setDocErrors((prev) => ({ ...prev, [index]: null }));
+  };
+
   const yesCount = Object.values(checklist).filter(v => v === 'yes').length;
-  const noCount  = Object.values(checklist).filter(v => v === 'no').length;
+  const noCount = Object.values(checklist).filter(v => v === 'no').length;
   const totalFilled = yesCount + noCount;
+  const totalDocs = Object.values(checklistDocs).filter(Boolean).length;
+
+  const sudahIsiGas = gasRows.some(r => r.time || r.lel || r.o2 || r.h2s || r.co2 || r.co || r.temp || r.sign || r.remark);
+
+  const buildData = () => ({
+    tanggalTerbit,
+    jamMulai,
+    jamSelesai,
+    berlakuHingga,
+    checklist: buildChecklist(checklistItems, checklist),
+    checklistDocs: Object.fromEntries(
+      Object.entries(checklistDocs).map(([key, doc]) => [
+        key,
+        doc ? { name: doc.file.name, size: doc.file.size, type: doc.file.type } : null
+      ])
+    ),
+    verifikasi,
+    gasMonitoring,
+    gasRows,
+    diukurOleh,
+    lainnya: { diisiOlehIA },
+  });
 
   const handleSimpan = () => {
-    markSertifikatFilled('Sertifikat Kerja Panas (SKP)');
-    router.push('/dashboard/pemohon/sika/pemeriksaan');
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
+    router.push('/dashboard/pemohon/sika/new');
+  };
+
+  const handleSaveAndClose = () => {
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
+    router.push('/dashboard/pemohon/sika/new');
   };
 
   return (
@@ -155,66 +466,61 @@ export default function SKPPage() {
 
       {/* TOP NAVBAR */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
-        <div className="flex items-center gap-2" style={{ paddingLeft: '30px' }}>
+        <div className="flex items-center gap-3" style={{ paddingLeft: '30px' }}>
           <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
-          <span className="font-bold text-gray-800 text-sm tracking-wide">ENTRY DATA</span>
-        </div>
-        <div className="text-sm font-medium flex items-center gap-1">
-          <span className="text-blue-400 cursor-pointer hover:underline" onClick={() => router.push('/dashboard/pemohon/sika/new')}>JENIS PEKERJAAN</span>
-          <span className="text-gray-400">&gt;</span>
-          <span className="text-blue-400 cursor-pointer hover:underline" onClick={() => router.push('/dashboard/pemohon/sika/pemeriksaan')}>PEMERIKSAAN</span>
-          <span className="text-gray-400">&gt;</span>
-          <span className="text-blue-800 font-semibold">SKP</span>
+          <div className="w-px h-10 bg-gray-200" />
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm font-bold text-gray-800">Entry Data</span>
+            <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
+              Sertifikat Kerja Panas
+            </span>
+          </div>
         </div>
       </div>
 
       <div className="px-6 py-6 space-y-4">
 
-       {/* HERO HEADER */}
-      <div className="bg-white rounded border-2 border-blue-400 overflow-hidden">
-        <div className="flex justify-end px-4 pt-2">
-          <span className="text-xs text-gray-400 font-mono">F-011/B-003/PG0300/2026-S9</span>
-        </div>
-        <div className="flex border-t border-gray-200">
-          <div className="flex items-center gap-3 px-5 py-4 border-r border-gray-200 shrink-0">
-            <span className="text-sm font-semibold text-gray-700 whitespace-nowrap">Rujukan SIKA No.</span>
-            <input
-              type="text"
-              placeholder="..."
-              className="border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-700 w-44 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition"
-            />
-          </div>
-          <div style={{ flex: 3, backgroundColor: '#ff0000', minHeight: '80px' }} className="flex items-center justify-center px-6 py-4">
-            <h1 style={{ color: '#ffffff', fontWeight: 900, fontSize: '18px', letterSpacing: '0.12em', textTransform: 'uppercase', margin: 0 }}>
-              Sertifikat Kerja Panas
-            </h1>
-          </div>
-          <div className="border-l border-gray-200 bg-white" style={{
-        flex: 1,
-        minHeight: '80px',
-        backgroundImage: 'url(/logopertaminagas.svg)',
-        backgroundSize: '100%',
-        backgroundRepeat: 'no-repeat',
-        backgroundPosition: 'left center',
-      }} />
-        </div>
-        <div className="px-5 py-2.5 bg-blue-50 border-t border-blue-200 flex items-center justify-end gap-2">
-          <div className={`w-2 h-2 rounded-full ${totalFilled === checklistItems.length ? 'bg-green-500' : 'bg-amber-400'}`} />
-          <span className="text-xs text-gray-500">{totalFilled}/{checklistItems.length} item checklist terisi</span>
-        </div>
-      </div>
+        {/* SATU BORDER — Rujukan/Hero s/d Bagian 5 dalam 1 container */}
+        <div className="bg-white rounded border-2 border-white shadow-lg overflow-hidden">
 
-        {/* ═══════════════════════════════════════════════════════════
-            SATU BORDER — Bagian 1 s/d Bagian 5 dalam 1 container
-        ════════════════════════════════════════════════════════════ */}
-        <div className="bg-white rounded border-2 border-blue-400 overflow-hidden divide-y divide-blue-200">
+          {/* HERO HEADER */}
+          <div className="flex justify-end px-4 pt-2">
+            <span className="text-xs text-gray-400 font-mono">F-011/B-003/PG0300/2026-S9</span>
+          </div>
+          <div className="flex border-t border-gray-200">
+            <div className="flex items-center gap-3 px-5 py-4 border-r border-gray-200 shrink-0">
+              <span className="text-sm font-semibold text-gray-700 whitespace-nowrap">Rujukan SIKA No.</span>
+              <input
+                type="text"
+                placeholder="..."
+                className="border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-700 w-44 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition"
+              />
+            </div>
+            <div style={{ flex: 3, backgroundColor: '#ff0000', minHeight: '80px' }} className="flex items-center justify-center px-6 py-4">
+              <h1 style={{ color: '#ffffff', fontWeight: 900, fontSize: '18px', letterSpacing: '0.12em', textTransform: 'uppercase', margin: 0 }}>
+                Sertifikat Kerja Panas
+              </h1>
+            </div>
+            <div className="border-l border-gray-200 bg-white" style={{
+              flex: 1,
+              minHeight: '80px',
+              backgroundImage: 'url(/logopertaminagaswhite.svg)',
+              backgroundSize: '100%',
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'left center',
+            }} />
+          </div>
+          <div className="px-5 py-2.5 bg-blue-50 border-t border-blue-200 flex items-center justify-end gap-2">
+            <div className={`w-2 h-2 rounded-full ${totalFilled === checklistItems.length ? 'bg-green-500' : 'bg-amber-400'}`} />
+            <span className="text-xs text-gray-500">{totalFilled}/{checklistItems.length} item checklist terisi</span>
+          </div>
 
           {/* BAGIAN 1 — Tanggal, Jam, Berlaku */}
           <div className="flex items-stretch" style={{ minHeight: '48px' }}>
             <div className="flex flex-1 border-r border-blue-200">
-             <div className="flex items-center justify-center px-5 py-2 border-r border-blue-200 bg-blue-100 shrink-0">
-              <span className="text-blue-700 font-bold text-xs tracking-wide uppercase whitespace-nowrap">Bagian 1 — Tanggal Terbit</span>
-            </div>
+              <div className="flex items-center justify-center px-5 py-2 border-r border-blue-200 bg-blue-100 shrink-0">
+                <span className="text-blue-700 font-bold text-xs tracking-wide uppercase whitespace-nowrap">Bagian 1 — Tanggal Terbit</span>
+              </div>
               <div className="flex items-center justify-center flex-1 px-3">
                 <input
                   type="date"
@@ -285,8 +591,8 @@ export default function SKPPage() {
 
           {/* BAGIAN 3 — Pemeriksaan */}
           <div>
-           <div className="px-5 py-4 border-b flex items-center justify-between" style={{ backgroundColor: '#FFFF00', borderColor: '#e6ac00' }}>
-            <span className="font-bold text-xs tracking-wide uppercase whitespace-nowrap" style={{ color: '#000000' }}>Bagian 3 — Pemeriksaan</span>
+            <div className="px-5 py-4 border-b flex items-center justify-between" style={{ backgroundColor: '#FFFF00', borderColor: '#e6ac00' }}>
+              <span className="font-bold text-xs tracking-wide uppercase whitespace-nowrap" style={{ color: '#000000' }}>Bagian 3 — Pemeriksaan</span>
               <div className="flex items-center gap-3">
                 <span className="flex items-center gap-1.5 text-xs text-green-600 bg-green-50 px-2.5 py-1 rounded-full border border-green-200">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> Yes: {yesCount}
@@ -294,7 +600,10 @@ export default function SKPPage() {
                 <span className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 px-2.5 py-1 rounded-full border border-red-200">
                   <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> No: {noCount}
                 </span>
-                <span className="text-xs text--400">{checklistItems.length - totalFilled} belum diisi</span>
+                <span className="flex items-center gap-1.5 text-xs text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200">
+                  <Paperclip size={10} /> Dokumen: {totalDocs}
+                </span>
+                <span className="text-xs text-gray-500">{checklistItems.length - totalFilled} belum diisi</span>
               </div>
             </div>
             <div className="px-6 py-4">
@@ -313,6 +622,7 @@ export default function SKPPage() {
                       <th className="text-left text-blue-700 font-semibold px-4 py-3 text-sm">Item Pemeriksaan</th>
                       <th className="text-center text-green-600 font-bold px-4 py-3 w-20 text-sm">YES</th>
                       <th className="text-center text-red-500 font-bold px-4 py-3 w-20 text-sm">NO</th>
+                      <th className="text-center text-blue-600 font-bold px-4 py-3 w-32 text-sm">Dokumen</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -340,19 +650,31 @@ export default function SKPPage() {
                               {val === 'no' && <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>}
                             </button>
                           </td>
+                          <td className="px-3 py-3 text-center">
+                            <DocUploadCell
+                              index={index}
+                              doc={checklistDocs[index] || null}
+                              error={docErrors[index] || null}
+                              onSelect={(file) => handleDocSelect(index, file)}
+                              onRemove={() => handleDocRemove(index)}
+                            />
+                          </td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
               </div>
+              <p className="text-xs text-gray-400 mt-2">
+                Format dokumen: JPG, PNG, WEBP, HEIC, atau PDF. Ukuran maksimal 10MB per item.
+              </p>
             </div>
           </div>
 
           {/* BAGIAN 4 — Verifikasi Lapangan */}
           <div>
-           <div className="px-5 py-4 border-b flex items-center justify-between" style={{ backgroundColor: '#00b050', borderColor: '#009040' }}>
-              <span className="font-bold text-xs tracking-wide uppercase whitespace-nowrap" style={{ color: '#ffffff' }}>Bagian 4 — Verifikasi Lapangan   </span>
+            <div className="px-5 py-4 border-b flex items-center justify-between" style={{ backgroundColor: '#00b050', borderColor: '#009040' }}>
+              <span className="font-bold text-xs tracking-wide uppercase whitespace-nowrap" style={{ color: '#ffffff' }}>Bagian 4 — Verifikasi Lapangan</span>
               <span className="text-xs text-white italic">Hanya Pemberi Kerja & Penanggung Jawab</span>
             </div>
             <div className="px-6 py-5">
@@ -381,13 +703,29 @@ export default function SKPPage() {
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm text-white mr-1">Pengukuran & monitoring gas:</span>
                 {(['ya', 'tidak'] as const).map((opt) => (
-                  <button key={opt} onClick={() => setGasMonitoring(gasMonitoring === opt ? null : opt)}
+                  <button 
+                    key={opt} 
+                    onClick={() => {
+                      if (opt === 'ya') {
+                        setGasMonitoring('ya');
+                      } else {
+                        setGasMonitoring('tidak');
+                        // Reset form gas kalau pilih tidak
+                        setGasRows([emptyGasRow()]);
+                        setDiukurOleh('');
+                      }
+                    }}
                     className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${
                       gasMonitoring === opt
-                        ? opt === 'ya' ? 'bg-blue-600 border-blue-600 text-white' : 'bg-red-500 border-red-500 text-white'
+                        ? opt === 'ya' 
+                          ? 'bg-blue-600 border-blue-600 text-white' 
+                          : 'bg-red-500 border-red-500 text-white'
                         : 'bg-white border-gray-200 text-gray-500 hover:border-blue-300'
-                    }`}>
-                    {opt === 'ya' ? 'Ya — gunakan form kondisi gas' : 'Tidak'}
+                    }`}
+                  >
+                    {opt === 'ya' 
+                      ? (sudahIsiGas ? '✓ Data Gas Terisi — Edit' : 'Ya — gunakan form kondisi gas') 
+                      : 'Tidak'}
                   </button>
                 ))}
               </div>
@@ -395,60 +733,72 @@ export default function SKPPage() {
 
             <div className="px-6 py-5 space-y-5">
 
-        {/* Safety Notes */}
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <div style={{ width: '16px', height: '16px', borderRadius: '50%', backgroundColor: '#22c55e', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                <path d="M2 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </div>
-            <p className="text-xs font-bold text-gray-800 uppercase tracking-wide">
-              Hal-hal yang harus menjadi perhatian untuk keselamatan pekerjaan
-            </p>
-          </div>
-          <div className="rounded-lg overflow-hidden border border-green-200 divide-y divide-green-100">
-            {safetyNotes.map((text, i) => (
-              <div key={i} className={`flex items-start gap-3 px-4 py-3 ${i % 2 === 0 ? 'bg-white' : 'bg-green-50'}`}>
-                <div style={{ width: '16px', height: '16px', borderRadius: '50%', backgroundColor: '#22c55e', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: '2px' }}>
-                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                    <path d="M2 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
+              {/* Formulir Pemeriksaan Kondisi Gas — muncul ketika toggle "Ya" dipilih */}
+              {gasMonitoring === 'ya' && (
+                <FormKondisiGas
+                  rows={gasRows}
+                  diukurOleh={diukurOleh}
+                  onDiukurOlehChange={setDiukurOleh}
+                  onRowChange={updateGasRow}
+                  onAddRow={addGasRow}
+                  onRemoveRow={removeGasRow}
+                />
+              )}
+
+              {/* Safety Notes */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <div style={{ width: '16px', height: '16px', borderRadius: '50%', backgroundColor: '#22c55e', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                      <path d="M2 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </div>
+                  <p className="text-xs font-bold text-gray-800 uppercase tracking-wide">
+                    Hal-hal yang harus menjadi perhatian untuk keselamatan pekerjaan
+                  </p>
                 </div>
-                <p className="text-sm text-gray-900 leading-relaxed">{text}</p>
+                <div className="rounded-lg overflow-hidden border border-green-200 divide-y divide-green-100">
+                  {safetyNotes.map((text, i) => (
+                    <div key={i} className={`flex items-start gap-3 px-4 py-3 ${i % 2 === 0 ? 'bg-white' : 'bg-green-50'}`}>
+                      <div style={{ width: '16px', height: '16px', borderRadius: '50%', backgroundColor: '#22c55e', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: '2px' }}>
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                          <path d="M2 5L4 7.5L8.5 2.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </div>
+                      <p className="text-sm text-gray-900 leading-relaxed">{text}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
+
+            </div>
           </div>
-        </div>
 
-      </div>
-    </div>
-
-      {/* DISTRIBUSI */}
-      <div className="flex border-t-2 border-blue-400">
-        <div className="flex items-center px-5 py-3 shrink-0" style={{ backgroundColor: '#c8b89a', minWidth: '140px' }}>
-          <span className="text-xs font-bold text-black uppercase tracking-widest">DISTRIBUSI:</span>
-        </div>
-        <div className="flex-1 flex items-center justify-center px-5 py-3 border-l border-gray-300" style={{ backgroundColor: '#ffffff' }}>
-          <span className="text-xs font-semibold text-black">Putih Sebagai Arsip Performing Authority (PA)</span>
-        </div>
-        <div className="flex-1 flex items-center justify-center px-5 py-3 border-l border-white/40" style={{ backgroundColor: '#92d050' }}>
-          <span className="text-xs font-bold" style={{ color: '#000000' }}>Hijau Sebagai Arsip HSE</span>
-        </div>
-        <div className="flex-1 flex items-center justify-center px-5 py-3 border-l border-yellow-200" style={{ backgroundColor: '#ffff00' }}>
-          <span className="text-xs font-bold" style={{ color: '#000000' }}>Kuning Sebagai Arsip SIKA Controller</span>
-        </div>
-      </div>
+          {/* DISTRIBUSI */}
+          <div className="flex">
+            <div className="flex items-center px-5 py-3 shrink-0" style={{ backgroundColor: '#c8b89a', minWidth: '140px' }}>
+              <span className="text-xs font-bold text-black uppercase tracking-widest">DISTRIBUSI:</span>
+            </div>
+            <div className="flex-1 flex items-center justify-center px-5 py-3 border-l border-gray-300" style={{ backgroundColor: '#ffffff' }}>
+              <span className="text-xs font-semibold text-black">Putih Sebagai Arsip Performing Authority (PA)</span>
+            </div>
+            <div className="flex-1 flex items-center justify-center px-5 py-3 border-l border-white/40" style={{ backgroundColor: '#92d050' }}>
+              <span className="text-xs font-bold" style={{ color: '#000000' }}>Hijau Sebagai Arsip HSE</span>
+            </div>
+            <div className="flex-1 flex items-center justify-center px-5 py-3 border-l border-yellow-200" style={{ backgroundColor: '#ffff00' }}>
+              <span className="text-xs font-bold" style={{ color: '#000000' }}>Kuning Sebagai Arsip SIKA Controller</span>
+            </div>
+          </div>
 
         </div>{/* akhir 1 border wrapper */}
 
         {/* FOOTER BUTTONS */}
         <div className="flex justify-end gap-3 py-2 pb-8">
-          <button onClick={() => router.push('/dashboard/pemohon/sika/pemeriksaan')}
+          <button onClick={() => router.push('/dashboard/pemohon/sika/new')}
             className="px-6 py-2 rounded bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition shadow-md shadow-red-200">
             Back
           </button>
-          <button onClick={() => router.push('/dashboard/pemohon/sika/pemeriksaan')}
+          <button onClick={handleSaveAndClose}
             className="px-6 py-2 rounded bg-green-500 hover:bg-green-600 text-white text-sm font-semibold transition shadow-md shadow-green-200">
             Save and Close
           </button>

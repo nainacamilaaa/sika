@@ -109,7 +109,7 @@ export default function EntryProgramPage() {
   ) => (
     <div className="flex-1 flex flex-col gap-2">
       {list.map((val, idx) => (
-        <div key={`${listKey}-${idx}`} className="flex gap-2">
+        <div key={`${listKey}-${idx}`} className="flex gap-2 items-center">
           <select
             value={val}
             onChange={(e) => {
@@ -136,9 +136,12 @@ export default function EntryProgramPage() {
             <button
               type="button"
               onClick={() => handleChange(listKey, list.filter((_, i) => i !== idx))}
-              className="bg-red-500 hover:bg-red-600 text-white text-sm font-medium px-4 py-2 rounded transition whitespace-nowrap"
+              className="text-red-500 hover:text-red-700 transition shrink-0 p-2"
+              aria-label="Hapus"
             >
-              Hapus
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
             </button>
           )}
         </div>
@@ -167,31 +170,43 @@ export default function EntryProgramPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-0">
-          {[
-            { label: 'Program', active: true },
-            { label: 'Pengisian SIKA', active: false },
-            { label: 'Pengisian JSA', active: false },
-            { label: 'Detail Program', active: false },
-          ].map((step, i, arr) => (
-            <div key={step.label} className="flex items-center">
-              <div className="flex items-center gap-2 px-3">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                  step.active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'
-                }`}>
-                  {i + 1}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-0">
+            {[
+              { label: 'Program', active: true },
+              { label: 'Pengisian SIKA', active: false },
+              { label: 'Pengisian JSA', active: false },
+              { label: 'Detail Program', active: false },
+            ].map((step, i, arr) => (
+              <div key={step.label} className="flex items-center">
+                <div className="flex items-center gap-2 px-2">
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                    step.active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'
+                  }`}>
+                    {i + 1}
+                  </div>
+                  <span className={`text-xs font-medium ${step.active ? 'text-blue-600' : 'text-gray-400'}`}>
+                    {step.label}
+                  </span>
                 </div>
-                <span className={`text-xs font-medium ${step.active ? 'text-blue-600' : 'text-gray-400'}`}>
-                  {step.label}
-                </span>
+                {i < arr.length - 1 && <div className="w-6 h-px bg-gray-200" />}
               </div>
-              {i < arr.length - 1 && <div className="w-8 h-px bg-gray-200" />}
-            </div>
-          ))}
+            ))}
+          </div>
+
+          <div className="w-px h-8 bg-gray-200" />
+
+          <div className="flex items-center gap-2" style={{ paddingRight: '1px' }}>
+            <img
+              src="/logopertaminagasfull.svg"
+              alt="Pertamina Gas"
+              className="h-8 object-contain"
+            />
+          </div>
         </div>
       </div>
 
-      <div className="px-6 py-8">
+      <div className="px-6 pt-3 pb-8">
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
 
           <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between"

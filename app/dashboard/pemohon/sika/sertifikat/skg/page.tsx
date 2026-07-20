@@ -1,19 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useProgramStore } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
-import { Users, Lock, CheckCircle } from 'lucide-react';
-
-const checklistItems = [
-  // KONDISI PERALATAN
-  { section: 'KONDISI PERALATAN', items: [
-    { label: 'Apakah objek yg bersangkutan/digali:', cols: [{ label: 'Berbahaya?', key: 'c1_berbahaya' }, { label: 'Rusak?/ Damaged?', key: 'c1_rusak' }] },
-    { label: 'Tipe penggalian apakah yg diijinkan:', cols: [{ label: 'Mekanik?', key: 'c2_mekanik' }, { label: 'Manual?/ Hand digging?', key: 'c2_manual' }] },
-    { label: 'Peralatan deteksi logam gg diperlukan:', cols: [{ label: 'Detektor logam?', key: 'c3_detektor' }, { label: 'Manual?/ Hand digging?', key: 'c3_manual' }] },
-  ]},
-];
+import { Users, Lock, CheckCircle, Paperclip, X, FileText, Plus, Trash2 } from 'lucide-react';
 
 // Flat single-column checklist items
 const checklistSingle = [
@@ -52,6 +43,30 @@ const safetyNotes = [
   'Lakukan koordinasi dan komunikasi yang efektif saat akan melakukan lowering pipa dan atau saat ada kegiatan yang dekat dengan fasilitas/utilitas eksisting yang terkena dampak.',
   'Beri tanda pembatas/safety line/barricade pada jarak yang aman agar kendaraan berat tidak melewati dekat lokasi galian.',
 ];
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ACCEPTED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'application/pdf'];
+
+type UploadedDoc = {
+  file: File;
+  previewUrl: string | null;
+};
+
+type GasRow = {
+  time: string;
+  lel: string;
+  o2: string;
+  h2s: string;
+  co2: string;
+  co: string;
+  temp: string;
+  sign: string;
+  remark: string;
+};
+
+const emptyGasRow = (): GasRow => ({
+  time: '', lel: '', o2: '', h2s: '', co2: '', co: '', temp: '', sign: '', remark: '',
+});
 
 function ReadOnlyField({ label, value, multiline = false }: { label: string; value: string; multiline?: boolean }) {
   return (
@@ -147,6 +162,214 @@ function YesNoCell({ val, onYes, onNo }: { val: 'yes' | 'no' | null; onYes: () =
   );
 }
 
+// Format ukuran file
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Tombol + preview upload dokumen
+function DocUploadCell({
+  id,
+  doc,
+  error,
+  onSelect,
+  onRemove,
+}: {
+  id: string;
+  doc: UploadedDoc | null;
+  error: string | null;
+  onSelect: (file: File) => void;
+  onRemove: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) onSelect(file);
+    e.target.value = '';
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-1 min-w-[110px]">
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,image/*,application/pdf"
+        onChange={handleFile}
+        className="hidden"
+        id={`doc-upload-${id}`}
+      />
+
+      {!doc ? (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="flex items-center gap-1.5 border border-dashed border-blue-300 text-blue-500 rounded px-2.5 py-1.5 text-sm hover:bg-blue-50 hover:border-blue-400 transition"
+        >
+          <Paperclip size={12} />
+          Upload
+        </button>
+      ) : (
+        <div className="flex items-center gap-1.5 bg-blue-50 border border-blue-200 rounded px-2 py-1.5 max-w-[150px]">
+          {doc.previewUrl ? (
+            <img src={doc.previewUrl} alt={doc.file.name} className="w-7 h-7 object-cover rounded shrink-0" />
+          ) : (
+            <FileText size={16} className="text-blue-500 shrink-0" />
+          )}
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm text-gray-800 truncate" title={doc.file.name}>{doc.file.name}</span>
+            <span className="text-sm text-gray-400">{formatFileSize(doc.file.size)}</span>
+          </div>
+          <button
+            type="button"
+            onClick={onRemove}
+            className="shrink-0 text-gray-400 hover:text-red-500 transition"
+            title="Hapus file"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <span className="text-sm text-red-500 text-center leading-tight">{error}</span>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// Formulir Pemeriksaan Kondisi Gas (Inline)
+// ═══════════════════════════════════════════════════════════
+function FormKondisiGas({
+  rows,
+  diukurOleh,
+  onDiukurOlehChange,
+  onRowChange,
+  onAddRow,
+  onRemoveRow,
+}: {
+  rows: GasRow[];
+  diukurOleh: string;
+  onDiukurOlehChange: (val: string) => void;
+  onRowChange: (index: number, field: keyof GasRow, value: string) => void;
+  onAddRow: () => void;
+  onRemoveRow: (index: number) => void;
+}) {
+  const inputCls =
+    'w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900 text-center focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition';
+
+  return (
+    <div className="rounded border-2 border-blue-300 overflow-hidden bg-white">
+      <div className="bg-blue-50 border-b border-blue-200 px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <p className="text-sm font-bold text-blue-700 uppercase tracking-wide">Formulir Pemeriksaan Kondisi Gas</p>
+          <p className="text-xs text-blue-400">Nomor Sika & Lokasi Kerja mengikuti data di atas</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600 whitespace-nowrap">Di ukur oleh:</label>
+          <input
+            type="text"
+            value={diukurOleh}
+            onChange={(e) => onDiukurOlehChange(e.target.value)}
+            placeholder="Nama petugas..."
+            className="border border-gray-200 rounded px-3 py-1.5 text-sm text-gray-900 w-52 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition"
+          />
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse min-w-[900px]">
+          <thead>
+            <tr className="bg-blue-100">
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold w-10">No</th>
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold w-24">Time</th>
+              <th colSpan={5} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold">Gas</th>
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold w-20">Temp °C</th>
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold w-24">Sign</th>
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 text-blue-700 font-semibold min-w-[140px]">Remark</th>
+              <th rowSpan={2} className="border border-blue-200 px-2 py-2 w-10"></th>
+            </tr>
+            <tr className="bg-blue-100">
+              <th className="border border-blue-200 px-2 py-1.5 text-blue-600 font-medium w-20">LEL %</th>
+              <th className="border border-blue-200 px-2 py-1.5 text-blue-600 font-medium w-20">O2 %</th>
+              <th className="border border-blue-200 px-2 py-1.5 text-blue-600 font-medium w-24">H2S ppm</th>
+              <th className="border border-blue-200 px-2 py-1.5 text-blue-600 font-medium w-24">CO2 ppm</th>
+              <th className="border border-blue-200 px-2 py-1.5 text-blue-600 font-medium w-24">CO ppm</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                <td className="border border-gray-100 px-2 py-1.5 text-center text-gray-500 font-mono">
+                  {String(index + 1).padStart(2, '0')}
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="time" value={row.time} onChange={(e) => onRowChange(index, 'time', e.target.value)} className={inputCls} />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.lel} onChange={(e) => onRowChange(index, 'lel', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.o2} onChange={(e) => onRowChange(index, 'o2', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.h2s} onChange={(e) => onRowChange(index, 'h2s', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.co2} onChange={(e) => onRowChange(index, 'co2', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.co} onChange={(e) => onRowChange(index, 'co', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.temp} onChange={(e) => onRowChange(index, 'temp', e.target.value)} className={inputCls} placeholder="0" />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input type="text" value={row.sign} onChange={(e) => onRowChange(index, 'sign', e.target.value)} className={inputCls} placeholder="..." />
+                </td>
+                <td className="border border-gray-100 px-2 py-1.5">
+                  <input
+                    type="text"
+                    value={row.remark}
+                    onChange={(e) => onRowChange(index, 'remark', e.target.value)}
+                    className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition"
+                    placeholder="Catatan..."
+                  />
+                </td>
+                <td className="border border-gray-100 px-1 py-1.5 text-center">
+                  <button
+                    type="button"
+                    onClick={() => onRemoveRow(index)}
+                    disabled={rows.length === 1}
+                    className={`transition ${rows.length === 1 ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-red-500'}`}
+                    title="Hapus baris"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="px-4 py-3 border-t border-blue-100 bg-gray-50">
+        <button
+          type="button"
+          onClick={onAddRow}
+          className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium transition"
+        >
+          <Plus size={14} />
+          Tambah Baris
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function SKGPage() {
   const router = useRouter();
   const { sika, markSertifikatFilled } = useProgramStore();
@@ -155,10 +378,9 @@ export default function SKGPage() {
   const canEditPA = user?.role === 'pemberi';
   const canEditIA = user?.role === 'pja';
 
-  // State untuk notifikasi
   const [showSuccess, setShowSuccess] = useState(false);
 
-  // Multi-column checklist state (kondisi peralatan)
+  // Multi-column checklist state
   const [multiChecklist, setMultiChecklist] = useState<Record<string, 'yes' | 'no' | null>>({});
   const toggleMulti = (key: string, val: 'yes' | 'no') =>
     setMultiChecklist((prev) => ({ ...prev, [key]: prev[key] === val ? null : val }));
@@ -170,10 +392,43 @@ export default function SKGPage() {
   const toggleChecklist = (index: number, val: 'yes' | 'no') =>
     setChecklist((prev) => ({ ...prev, [index]: prev[index] === val ? null : val }));
 
-  // Verifikasi lapangan checklist (Bagian 4)
+  // Verifikasi lapangan checklist
   const [verLapChecklist, setVerLapChecklist] = useState<Record<number, { left: 'yes' | 'no' | null; right: 'yes' | 'no' | null }>>(
     Object.fromEntries(verifikasiLapanganItems.map((_, i) => [i, { left: null, right: null }]))
   );
+
+  // Dokumen pendukung
+  const [checklistDocs, setChecklistDocs] = useState<Record<string, UploadedDoc | null>>({});
+  const [docErrors, setDocErrors] = useState<Record<string, string | null>>({});
+
+  const handleDocSelect = (id: string, file: File) => {
+    if (!ACCEPTED_TYPES.includes(file.type) && !/\.(jpe?g|png|webp|heic|pdf)$/i.test(file.name)) {
+      setDocErrors((prev) => ({ ...prev, [id]: 'Format harus foto atau PDF' }));
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      setDocErrors((prev) => ({ ...prev, [id]: 'Ukuran file maks 10MB' }));
+      return;
+    }
+    setDocErrors((prev) => ({ ...prev, [id]: null }));
+    setChecklistDocs((prev) => {
+      const old = prev[id];
+      if (old?.previewUrl) URL.revokeObjectURL(old.previewUrl);
+      const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
+      return { ...prev, [id]: { file, previewUrl } };
+    });
+  };
+
+  const handleDocRemove = (id: string) => {
+    setChecklistDocs((prev) => {
+      const old = prev[id];
+      if (old?.previewUrl) URL.revokeObjectURL(old.previewUrl);
+      return { ...prev, [id]: null };
+    });
+    setDocErrors((prev) => ({ ...prev, [id]: null }));
+  };
+
+  const totalDocs = Object.values(checklistDocs).filter(Boolean).length;
 
   // Kedalaman penggalian
   const [kedalaman, setKedalaman] = useState<string | null>(null);
@@ -182,7 +437,7 @@ export default function SKGPage() {
   // Item 15 — pencegahan lainnya
   const [pencegahanLain, setPencegahanLain] = useState('');
 
-  // Keterangan tambahan (Bagian 4)
+  // Keterangan tambahan
   const [keteranganTambahan, setKeteranganTambahan] = useState('');
 
   const [diisiOlehIA, setDiisiOlehIA] = useState(false);
@@ -195,30 +450,38 @@ export default function SKGPage() {
   });
   const [gasMonitoring, setGasMonitoring] = useState<'ya' | 'tidak' | null>(null);
 
+  // Data Formulir Pemeriksaan Kondisi Gas
+  const [gasRows, setGasRows] = useState<GasRow[]>([emptyGasRow()]);
+  const [diukurOleh, setDiukurOleh] = useState('');
+
+  const updateGasRow = (index: number, field: keyof GasRow, value: string) => {
+    setGasRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
+  };
+
+  const addGasRow = () => setGasRows((prev) => [...prev, emptyGasRow()]);
+
+  const removeGasRow = (index: number) => {
+    setGasRows((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
+  };
+
   const yesCount = Object.values(checklist).filter(v => v === 'yes').length;
   const noCount = Object.values(checklist).filter(v => v === 'no').length;
   const totalFilled = yesCount + noCount;
   const totalItems = checklistSingle.length + 3 /* kondisi */ + 1 /* kedalaman */;
 
-  // Handler untuk Simpan
+  const sudahIsiGas = gasRows.some(r => r.time || r.lel || r.o2 || r.h2s || r.co2 || r.co || r.temp || r.sign || r.remark);
+
   const handleSimpan = () => {
-    // Tandai sertifikat sebagai terisi di store
     markSertifikatFilled('Sertifikat Kerja Penggalian (SKG)');
-    
-    // Tampilkan notifikasi sukses
     setShowSuccess(true);
-    
-    // Redirect setelah 1.5 detik
     setTimeout(() => {
-      router.push('/dashboard/pemohon/sika/pemeriksaan');
+      router.push('/dashboard/pemohon/sika/new');
     }, 1500);
   };
 
-  // Handler untuk Save and Close
   const handleSaveAndClose = () => {
-    // Tandai sertifikat sebagai terisi
     markSertifikatFilled('Sertifikat Kerja Penggalian (SKG)');
-    router.push('/dashboard/pemohon/sika/pemeriksaan');
+    router.push('/dashboard/pemohon/sika/new');
   };
 
   return (
@@ -226,16 +489,15 @@ export default function SKGPage() {
 
       {/* TOP NAVBAR */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
-        <div className="flex items-center gap-2" style={{ paddingLeft: '30px' }}>
+        <div className="flex items-center gap-3" style={{ paddingLeft: '30px' }}>
           <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
-          <span className="font-bold text-gray-800 text-sm tracking-wide">ENTRY DATA</span>
-        </div>
-        <div className="text-sm font-medium flex items-center gap-1">
-          <span className="text-blue-400 cursor-pointer hover:underline" onClick={() => router.push('/dashboard/pemohon/sika/new')}>JENIS PEKERJAAN</span>
-          <span className="text-gray-400">&gt;</span>
-          <span className="text-blue-400 cursor-pointer hover:underline" onClick={() => router.push('/dashboard/pemohon/sika/pemeriksaan')}>PEMERIKSAAN</span>
-          <span className="text-gray-400">&gt;</span>
-          <span className="text-blue-800 font-semibold">SKG</span>
+          <div className="w-px h-10 bg-gray-200" />
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm font-bold text-gray-800">Entry Data</span>
+            <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
+              Sertifikat Kerja Penggalian
+            </span>
+          </div>
         </div>
       </div>
 
@@ -254,8 +516,10 @@ export default function SKGPage() {
 
       <div className="px-6 py-6 space-y-4">
 
-        {/* HERO HEADER */}
-        <div className="bg-white rounded border-2 border-blue-400 overflow-hidden">
+        {/* SATU BORDER — Hero s/d Bagian 5 dalam 1 container */}
+        <div className="bg-white rounded border-2 border-white shadow-lg overflow-hidden">
+
+          {/* HERO HEADER */}
           <div className="flex justify-end px-4 pt-2">
             <span className="text-xs text-gray-400 font-mono">F-012/B-003/PG0300/2026-S9</span>
           </div>
@@ -268,7 +532,6 @@ export default function SKGPage() {
                 className="border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-700 w-44 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition"
               />
             </div>
-            {/* Brown/olive header for SKG */}
             <div style={{ flex: 3, backgroundColor: '#7B3F00', minHeight: '80px' }} className="flex items-center justify-center px-6 py-4">
               <h1 style={{ color: '#ffffff', fontWeight: 900, fontSize: '18px', letterSpacing: '0.12em', textTransform: 'uppercase', margin: 0 }}>
                 Sertifikat Kerja Penggalian
@@ -276,24 +539,17 @@ export default function SKGPage() {
             </div>
             <div className="border-l border-gray-200 bg-white flex items-center justify-center px-4" style={{ flex: 1, minHeight: '80px' }}>
               <div className="w-full h-full" style={{
-                backgroundImage: 'url(/logopertaminagas.svg)',
+                backgroundImage: 'url(/logopertaminagaswhite.svg)',
                 backgroundSize: '100%',
                 backgroundRepeat: 'no-repeat',
                 backgroundPosition: 'left center',
               }} />
-              <span className="text-xs font-black text-gray-800 tracking-widest whitespace-nowrap">SKG</span>
             </div>
           </div>
           <div className="px-5 py-2.5 bg-blue-50 border-t border-blue-200 flex items-center justify-end gap-2">
             <div className={`w-2 h-2 rounded-full ${totalFilled >= totalItems ? 'bg-green-500' : 'bg-amber-400'}`} />
             <span className="text-xs text-gray-500">{totalFilled}/{checklistSingle.length} item checklist terisi</span>
           </div>
-        </div>
-
-        {/* ═══════════════════════════════════════════════════════════
-            SATU BORDER — Bagian 1 s/d Bagian 5
-        ════════════════════════════════════════════════════════════ */}
-        <div className="bg-white rounded border-2 border-blue-400 overflow-hidden divide-y divide-blue-200">
 
           {/* BAGIAN 1 — Tanggal, Jam, Berlaku */}
           <div className="flex items-stretch" style={{ minHeight: '48px' }}>
@@ -331,6 +587,7 @@ export default function SKGPage() {
                   className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition" />
               </div>
             </div>
+            <div className="h-3 bg-gray-100 border-y border-blue-200" />
           </div>
 
           <div className="h-3 bg-gray-100" />
@@ -347,7 +604,7 @@ export default function SKGPage() {
               <ReadOnlyField label="Peralatan / No. Identitas" value={sika?.peralatanNoIdentitas || ''} />
               <ReadOnlyField label="Jumlah Pekerja"            value={sika?.pekerjaList?.length ? `${sika.pekerjaList.length} orang` : ''} />
               <ReadOnlyField label="Uraian Pekerjaan"          value={sika?.uraianPekerjaan || ''} multiline />
-              {/* Peralatan kerja yang akan digunakan — multi-line list */}
+              {/* Peralatan kerja yang akan digunakan */}
               <div className="px-5 py-3">
                 <label className="w-44 text-sm text-gray-900 font-medium block mb-2">Peralatan kerja yang akan digunakan:</label>
                 <div className="space-y-1.5 pl-2">
@@ -392,6 +649,9 @@ export default function SKGPage() {
                 <span className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 px-2.5 py-1 rounded-full border border-red-200">
                   <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> No: {noCount}
                 </span>
+                <span className="flex items-center gap-1.5 text-xs text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200">
+                  <Paperclip size={10} /> Dokumen: {totalDocs}
+                </span>
                 <span className="text-xs text-gray-400">{checklistSingle.length - totalFilled} belum diisi</span>
               </div>
             </div>
@@ -412,13 +672,13 @@ export default function SKGPage() {
                       <th className="text-left text-blue-700 font-semibold px-4 py-3 w-8 text-sm">No</th>
                       <th className="text-left text-blue-700 font-semibold px-4 py-3 text-sm">Item Pemeriksaan</th>
                       <th className="text-center text-green-600 font-bold px-4 py-3 w-28 text-sm" colSpan={2}>Yes / No</th>
-                      <th className="text-center text-green-600 font-bold px-4 py-3 w-28 text-sm" colSpan={2}>Yes / No</th>
+                      <th className="text-center text-blue-600 font-bold px-4 py-3 w-28 text-sm">Dokumen</th>
                     </tr>
                   </thead>
                   <tbody>
                     {/* Sub-section header: KONDISI PERALATAN */}
                     <tr className="bg-yellow-50 border-b border-yellow-200">
-                      <td colSpan={6} className="px-4 py-2 text-xs font-bold text-yellow-800 uppercase tracking-wider">KONDISI PERALATAN</td>
+                      <td colSpan={5} className="px-4 py-2 text-xs font-bold text-yellow-800 uppercase tracking-wider">KONDISI PERALATAN</td>
                     </tr>
 
                     {/* Row 1 */}
@@ -428,12 +688,19 @@ export default function SKGPage() {
                       <td className="px-3 py-3 text-center">
                         <span className="text-xs text-gray-500 block mb-1">Berbahaya?</span>
                         <YesNoCell val={multiChecklist['c1_berbahaya'] ?? null} onYes={() => toggleMulti('c1_berbahaya', 'yes')} onNo={() => toggleMulti('c1_berbahaya', 'no')} />
-                      </td>
-                      <td className="px-3 py-3 text-center border-l border-gray-100">
-                        <span className="text-xs text-gray-500 block mb-1">Rusak?/ Damaged?</span>
+                        <span className="text-xs text-gray-500 block mt-2 mb-1">Rusak?/ Damaged?</span>
                         <YesNoCell val={multiChecklist['c1_rusak'] ?? null} onYes={() => toggleMulti('c1_rusak', 'yes')} onNo={() => toggleMulti('c1_rusak', 'no')} />
                       </td>
-                      <td colSpan={2} />
+                      <td />
+                      <td className="px-3 py-3 text-center">
+                        <DocUploadCell
+                          id="kondisi-1"
+                          doc={checklistDocs['kondisi-1'] || null}
+                          error={docErrors['kondisi-1'] || null}
+                          onSelect={(file) => handleDocSelect('kondisi-1', file)}
+                          onRemove={() => handleDocRemove('kondisi-1')}
+                        />
+                      </td>
                     </tr>
 
                     {/* Row 2 */}
@@ -443,12 +710,19 @@ export default function SKGPage() {
                       <td className="px-3 py-3 text-center">
                         <span className="text-xs text-gray-500 block mb-1">Mekanik?</span>
                         <YesNoCell val={multiChecklist['c2_mekanik'] ?? null} onYes={() => toggleMulti('c2_mekanik', 'yes')} onNo={() => toggleMulti('c2_mekanik', 'no')} />
-                      </td>
-                      <td className="px-3 py-3 text-center border-l border-gray-100">
-                        <span className="text-xs text-gray-500 block mb-1">Manual?/ Hand digging?</span>
+                        <span className="text-xs text-gray-500 block mt-2 mb-1">Manual?/ Hand digging?</span>
                         <YesNoCell val={multiChecklist['c2_manual'] ?? null} onYes={() => toggleMulti('c2_manual', 'yes')} onNo={() => toggleMulti('c2_manual', 'no')} />
                       </td>
-                      <td colSpan={2} />
+                      <td />
+                      <td className="px-3 py-3 text-center">
+                        <DocUploadCell
+                          id="kondisi-2"
+                          doc={checklistDocs['kondisi-2'] || null}
+                          error={docErrors['kondisi-2'] || null}
+                          onSelect={(file) => handleDocSelect('kondisi-2', file)}
+                          onRemove={() => handleDocRemove('kondisi-2')}
+                        />
+                      </td>
                     </tr>
 
                     {/* Row 3 */}
@@ -458,26 +732,43 @@ export default function SKGPage() {
                       <td className="px-3 py-3 text-center">
                         <span className="text-xs text-gray-500 block mb-1">Detektor logam?</span>
                         <YesNoCell val={multiChecklist['c3_detektor'] ?? null} onYes={() => toggleMulti('c3_detektor', 'yes')} onNo={() => toggleMulti('c3_detektor', 'no')} />
-                      </td>
-                      <td className="px-3 py-3 text-center border-l border-gray-100">
-                        <span className="text-xs text-gray-500 block mb-1">Manual?/ Hand digging?</span>
+                        <span className="text-xs text-gray-500 block mt-2 mb-1">Manual?/ Hand digging?</span>
                         <YesNoCell val={multiChecklist['c3_manual'] ?? null} onYes={() => toggleMulti('c3_manual', 'yes')} onNo={() => toggleMulti('c3_manual', 'no')} />
                       </td>
-                      <td colSpan={2} />
+                      <td />
+                      <td className="px-3 py-3 text-center">
+                        <DocUploadCell
+                          id="kondisi-3"
+                          doc={checklistDocs['kondisi-3'] || null}
+                          error={docErrors['kondisi-3'] || null}
+                          onSelect={(file) => handleDocSelect('kondisi-3', file)}
+                          onRemove={() => handleDocRemove('kondisi-3')}
+                        />
+                      </td>
                     </tr>
 
                     {/* Single-column items 4–13 */}
                     {checklistSingle.map((item, index) => {
                       const val = checklist[index];
                       const rowNum = index + 4;
+                      const docId = `single-${index}`;
                       return (
                         <tr key={index} className={`border-b border-gray-100 transition-colors ${
                           val === 'yes' ? 'bg-green-50' : val === 'no' ? 'bg-red-50' : rowNum % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
                         }`}>
                           <td className="px-4 py-3 text-gray-900 text-sm font-mono">{String(rowNum).padStart(2, '0')}</td>
-                          <td className="px-4 py-3 text-gray-900 text-sm leading-relaxed" colSpan={3}>{item}</td>
-                          <td className="px-4 py-3 text-center" colSpan={2}>
+                          <td className="px-4 py-3 text-gray-900 text-sm leading-relaxed" colSpan={2}>{item}</td>
+                          <td className="px-4 py-3 text-center">
                             <YesNoCell val={val} onYes={() => toggleChecklist(index, 'yes')} onNo={() => toggleChecklist(index, 'no')} />
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            <DocUploadCell
+                              id={docId}
+                              doc={checklistDocs[docId] || null}
+                              error={docErrors[docId] || null}
+                              onSelect={(file) => handleDocSelect(docId, file)}
+                              onRemove={() => handleDocRemove(docId)}
+                            />
                           </td>
                         </tr>
                       );
@@ -487,7 +778,7 @@ export default function SKGPage() {
                     <tr className="border-b border-gray-100 bg-white">
                       <td className="px-4 py-3 text-gray-900 text-sm font-mono">14</td>
                       <td className="px-4 py-3 text-gray-900 text-sm font-medium">Kedalaman penggalian</td>
-                      <td colSpan={4} className="px-4 py-3">
+                      <td colSpan={3} className="px-4 py-3">
                         <div className="flex items-center gap-3 flex-wrap">
                           {depthOptions.map((opt) => (
                             <label key={opt} className="flex items-center gap-1.5 cursor-pointer">
@@ -524,7 +815,7 @@ export default function SKGPage() {
                     {/* Row 15 — Pencegahan lainnya */}
                     <tr className="border-b border-gray-100 bg-gray-50/50">
                       <td className="px-4 py-3 text-gray-900 text-sm font-mono">15</td>
-                      <td className="px-4 py-3 text-gray-900 text-sm" colSpan={5}>
+                      <td className="px-4 py-3 text-gray-900 text-sm" colSpan={4}>
                         <div className="flex items-start gap-3">
                           <span className="shrink-0 pt-0.5">Jika ya, sebutkan pencegahan-pencegahan lainnya:</span>
                           <input
@@ -540,6 +831,9 @@ export default function SKGPage() {
                   </tbody>
                 </table>
               </div>
+              <p className="text-xs text-gray-400 mt-2">
+                Format dokumen: JPG, PNG, WEBP, HEIC, atau PDF. Ukuran maksimal 10MB per item.
+              </p>
             </div>
           </div>
 
@@ -562,7 +856,7 @@ export default function SKGPage() {
                 </p>
               </div>
 
-              {/* Verifikasi sub-checklist (pipe, cable, fire) */}
+              {/* Verifikasi sub-checklist */}
               <div className="rounded overflow-hidden border border-green-200">
                 <table className="w-full text-sm border-collapse">
                   <thead>
@@ -571,33 +865,46 @@ export default function SKGPage() {
                       <th className="text-center text-green-600 font-bold px-4 py-2 w-28 text-sm">Yes / No</th>
                       <th className="text-center text-blue-600 font-semibold px-4 py-2 text-sm">Gambar/PID tersedia</th>
                       <th className="text-center text-green-600 font-bold px-4 py-2 w-28 text-sm">Yes / No</th>
+                      <th className="text-center text-blue-600 font-bold px-4 py-2 w-28 text-sm">Dokumen</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {verifikasiLapanganItems.map((item, i) => (
-                      <tr key={i} className={`border-b border-gray-100 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                        <td className="px-4 py-3 text-gray-900 text-sm leading-relaxed">{item}</td>
-                        <td className="px-4 py-3 text-center">
-                          <YesNoCell
-                            val={verLapChecklist[i]?.left ?? null}
-                            onYes={() => setVerLapChecklist(p => ({ ...p, [i]: { ...p[i], left: p[i]?.left === 'yes' ? null : 'yes' } }))}
-                            onNo={() => setVerLapChecklist(p => ({ ...p, [i]: { ...p[i], left: p[i]?.left === 'no' ? null : 'no' } }))}
-                          />
-                        </td>
-                        <td className="px-4 py-3 text-center text-sm text-gray-400 italic">Gambar/PID tersedia</td>
-                        <td className="px-4 py-3 text-center">
-                          <YesNoCell
-                            val={verLapChecklist[i]?.right ?? null}
-                            onYes={() => setVerLapChecklist(p => ({ ...p, [i]: { ...p[i], right: p[i]?.right === 'yes' ? null : 'yes' } }))}
-                            onNo={() => setVerLapChecklist(p => ({ ...p, [i]: { ...p[i], right: p[i]?.right === 'no' ? null : 'no' } }))}
-                          />
-                        </td>
-                      </tr>
-                    ))}
+                    {verifikasiLapanganItems.map((item, i) => {
+                      const docId = `verlap-${i}`;
+                      return (
+                        <tr key={i} className={`border-b border-gray-100 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+                          <td className="px-4 py-3 text-gray-900 text-sm leading-relaxed">{item}</td>
+                          <td className="px-4 py-3 text-center">
+                            <YesNoCell
+                              val={verLapChecklist[i]?.left ?? null}
+                              onYes={() => setVerLapChecklist(p => ({ ...p, [i]: { ...p[i], left: p[i]?.left === 'yes' ? null : 'yes' } }))}
+                              onNo={() => setVerLapChecklist(p => ({ ...p, [i]: { ...p[i], left: p[i]?.left === 'no' ? null : 'no' } }))}
+                            />
+                          </td>
+                          <td className="px-4 py-3 text-center text-sm text-gray-400 italic">Gambar/PID tersedia</td>
+                          <td className="px-4 py-3 text-center">
+                            <YesNoCell
+                              val={verLapChecklist[i]?.right ?? null}
+                              onYes={() => setVerLapChecklist(p => ({ ...p, [i]: { ...p[i], right: p[i]?.right === 'yes' ? null : 'yes' } }))}
+                              onNo={() => setVerLapChecklist(p => ({ ...p, [i]: { ...p[i], right: p[i]?.right === 'no' ? null : 'no' } }))}
+                            />
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            <DocUploadCell
+                              id={docId}
+                              doc={checklistDocs[docId] || null}
+                              error={docErrors[docId] || null}
+                              onSelect={(file) => handleDocSelect(docId, file)}
+                              onRemove={() => handleDocRemove(docId)}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {/* Keterangan Tambahan */}
                     <tr className="border-b border-gray-100 bg-white">
                       <td className="px-4 py-3 text-gray-900 text-sm font-medium">4&nbsp;&nbsp; Keterangan Tambahan:</td>
-                      <td colSpan={3} className="px-4 py-3">
+                      <td colSpan={4} className="px-4 py-3">
                         <input
                           type="text"
                           value={keteranganTambahan}
@@ -628,19 +935,47 @@ export default function SKGPage() {
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm text-white mr-1">Pengukuran & monitoring gas:</span>
                 {(['ya', 'tidak'] as const).map((opt) => (
-                  <button key={opt} onClick={() => setGasMonitoring(gasMonitoring === opt ? null : opt)}
+                  <button 
+                    key={opt} 
+                    onClick={() => {
+                      if (opt === 'ya') {
+                        setGasMonitoring('ya');
+                      } else {
+                        setGasMonitoring('tidak');
+                        setGasRows([emptyGasRow()]);
+                        setDiukurOleh('');
+                      }
+                    }}
                     className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${
                       gasMonitoring === opt
-                        ? opt === 'ya' ? 'bg-blue-600 border-blue-600 text-white' : 'bg-red-500 border-red-500 text-white'
+                        ? opt === 'ya' 
+                          ? 'bg-blue-600 border-blue-600 text-white' 
+                          : 'bg-red-500 border-red-500 text-white'
                         : 'bg-white border-gray-200 text-gray-500 hover:border-blue-300'
-                    }`}>
-                    {opt === 'ya' ? 'Ya — gunakan form kondisi gas' : 'Tidak'}
+                    }`}
+                  >
+                    {opt === 'ya' 
+                      ? (sudahIsiGas ? '✓ Data Gas Terisi — Edit' : 'Ya — gunakan form kondisi gas') 
+                      : 'Tidak'}
                   </button>
                 ))}
               </div>
             </div>
 
             <div className="px-6 py-5 space-y-5">
+
+              {/* Formulir Pemeriksaan Kondisi Gas — muncul ketika toggle "Ya" dipilih */}
+              {gasMonitoring === 'ya' && (
+                <FormKondisiGas
+                  rows={gasRows}
+                  diukurOleh={diukurOleh}
+                  onDiukurOlehChange={setDiukurOleh}
+                  onRowChange={updateGasRow}
+                  onAddRow={addGasRow}
+                  onRemoveRow={removeGasRow}
+                />
+              )}
+
               {/* Safety Notes */}
               <div>
                 <div className="flex items-center gap-2 mb-3">
@@ -670,7 +1005,7 @@ export default function SKGPage() {
           </div>
 
           {/* DISTRIBUSI */}
-          <div className="flex border-t-2 border-blue-400">
+          <div className="flex">
             <div className="flex items-center px-5 py-3 shrink-0" style={{ backgroundColor: '#c8b89a', minWidth: '140px' }}>
               <span className="text-xs font-bold text-black uppercase tracking-widest">DISTRIBUSI:</span>
             </div>
@@ -689,7 +1024,7 @@ export default function SKGPage() {
 
         {/* FOOTER BUTTONS */}
         <div className="flex justify-end gap-3 py-2 pb-8">
-          <button onClick={() => router.push('/dashboard/pemohon/sika/pemeriksaan')}
+          <button onClick={() => router.push('/dashboard/pemohon/sika/new')}
             className="px-6 py-2 rounded bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition shadow-md shadow-red-200">
             Back
           </button>

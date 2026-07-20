@@ -135,6 +135,9 @@ export default function DashboardPemberi() {
         </div>
       </section>
 
+      {/* Aksen garis atas footer */}
+      <div style={{ height: '3px', background: 'linear-gradient(90deg, #1a56b0 0%, #eab308 50%, #1a56b0 100%)' }} />
+
       {/* ─── FOOTER ─── */}
       <footer style={{ backgroundColor: '#1a56b0' }}>
 
