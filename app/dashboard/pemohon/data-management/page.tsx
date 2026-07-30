@@ -9,8 +9,8 @@ import {
   TrendingUp, TrendingDown, Activity, ClipboardCheck,
   Loader2
 } from 'lucide-react';
-import { useProgramStore } from '@/store/programStore';
-import type { ApprovalStatus } from '@/store/programStore';
+import { useProgramStore, getNomorSika, getOverallStatus } from '@/store/programStore';
+import type { ApprovalStatus, OverallStatus } from '@/store/programStore';
 import {
   ResponsiveContainer, Tooltip, Legend,
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -38,24 +38,22 @@ interface SIKARow {
   alasanTolakJsa?: string | null;
   sifatPekerjaan: string;
   identifikasiBahaya: string[];
+  // Tanggal-tanggal (YYYY-MM-DD) revalidasi harian yang sudah dikonfirmasi
+  // untuk submission ini — datang dari store, bukan state lokal, supaya
+  // tidak hilang saat reload.
+  riwayatRevalidasi: string[];
+  // Status perubahan data (sertifikat/pekerja baru dll) yang diajukan lewat
+  // "Kirim Konfirmasi Revalidasi" di Detail Program — terpisah dari status
+  // approval utama, lihat programStore.ts.
+  perubahanStatus: 'none' | 'menunggu' | 'disetujui' | 'ditolak';
+  alasanTolakPerubahan?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
 
-type OverallStatus = 'aktif' | 'pending' | 'ditolak' | 'closed' | 'draft';
-
-const getOverallStatus = (
-  sikaP: ApprovalStatus,
-  jsaP: ApprovalStatus,
-  sikaPJA: ApprovalStatus,
-  jsaPJA: ApprovalStatus
-): 'aktif' | 'pending' | 'ditolak' | 'closed' | 'draft' => {
-  if (sikaP === 'rejected' || jsaP === 'rejected' || sikaPJA === 'rejected' || jsaPJA === 'rejected') return 'ditolak';
-  if (sikaPJA === 'approved' && jsaPJA === 'approved') return 'closed';
-  if (sikaP === 'approved' && jsaP === 'approved') return 'aktif';
-  if (sikaP === 'request' || jsaP === 'request') return 'pending';
-  return 'draft';
-};
+// OverallStatus & getOverallStatus sekarang diimpor dari store (lihat import
+// di atas) supaya Data Management dan Detail Program pakai logika status
+// yang persis sama, tidak ada risiko dua definisi yang diam-diam beda.
 
 /* ============================================================
    BOLD PERTAMINA GAS PALETTE
@@ -318,8 +316,9 @@ function RevalidasiCell({
   const hariKeDitampilkan = Math.min(Math.max(hariKe, 1), MAX_HARI_REVALIDASI);
   const hariIni = days.find(d => d.dayNumber === hariKeDitampilkan);
   const sudahValidasiHariIni = hariIni?.status === 'validated';
+  const perubahanMenunggu = row.perubahanStatus === 'menunggu';
 
-  const perluAksi = baseStatus === 'aktif' && !sudahLewatBatas && !sudahValidasiHariIni;
+  const perluAksi = baseStatus === 'aktif' && !sudahLewatBatas && !sudahValidasiHariIni && !perubahanMenunggu;
 
   return (
     <div className="flex flex-col gap-1.5 w-40">
@@ -358,7 +357,13 @@ function RevalidasiCell({
         </button>
       )}
 
-      {sudahValidasiHariIni && !sudahLewatBatas && (
+      {perubahanMenunggu && (
+        <p className="text-[10px] font-medium leading-snug" style={{ color: '#F2A900' }}>
+          Menunggu persetujuan perubahan dari Pemberi Kerja.
+        </p>
+      )}
+
+      {!perubahanMenunggu && sudahValidasiHariIni && !sudahLewatBatas && (
         <p className="text-[10px] text-gray-400 leading-snug">
           Validasi berikutnya dibuka besok.
         </p>
@@ -383,6 +388,7 @@ function RevalidasiModal({
   onSubmit: (data: { catatan: string }) => void;
 }) {
   const router = useRouter();
+  const { openSubmission } = useProgramStore();
   const [confirmasi, setConfirmasi] = useState({
     kondisiArea: false,
     identifikasiBahaya: false,
@@ -399,15 +405,19 @@ function RevalidasiModal({
   const toggle = (key: keyof typeof confirmasi) =>
     setConfirmasi((prev) => ({ ...prev, [key]: !prev[key] }));
 
-  // Jika pemohon menandai perlu menambah sertifikat/pekerja baru dll,
-  // langsung arahkan ke form pengajuan baru untuk dilengkapi sampai seluruh
-  // proses selesai — mulai dari pengisian data sampai halaman detail persetujuan.
+  // Jika pemohon menandai perlu menambah sertifikat/pekerja baru dll, muat
+  // dulu data submission ini ke draft aktif (openSubmission) supaya form
+  // Program/SIKA/JSA terisi dengan data yang SUDAH ADA — pemohon tinggal
+  // melengkapi/mengubah bagian yang perlu, bukan mengisi dari kosong.
+  // Setelah selesai di halaman Detail Program, tombol "Kirim Konfirmasi
+  // Revalidasi" di sana yang mengirim perubahan ini ke Pemberi Kerja.
   // Sekali dicentang, pilihan ini terkunci (tidak bisa di-uncheck) karena
   // pengguna akan segera berpindah halaman.
   const handleTogglePerluTambahan = () => {
     if (perluTambahan || redirecting) return;
     setPerluTambahan(true);
     setRedirecting(true);
+    openSubmission(row.id);
     router.push('/dashboard/pemohon/program/new');
   };
 
@@ -526,10 +536,10 @@ function RevalidasiModal({
       className="sr-only"
     />
     <div className="flex-1 min-w-0 space-y-1.5">
-      <span className="font-semibold text-gray-700 leading-relaxed block wrap-break-word">
+      <span className="font-semibold text-gray-700 leading-relaxed block break-words">
         Perlu menambah sertifikat, pekerja baru, atau perubahan lain?
       </span>
-      <p className="text-[10px] font-normal text-gray-500 leading-relaxed wrap-break-word">
+      <p className="text-[10px] font-normal text-gray-500 leading-relaxed break-words">
         Kamu akan diarahkan ke form pengajuan SIKA baru untuk melengkapi perubahan ini,
         dari pengisian data sampai persetujuan selesai.
       </p>
@@ -601,11 +611,11 @@ function RevalidasiModal({
 export default function PemohonMonitoringPage() {
   const router = useRouter();
   const {
-    program, jsa, sika,
-    sikaStatusPemberi, jsaStatusPemberi,
-    sikaStatusPJA, jsaStatusPJA,
-    alasanTolakSikaPemberi, alasanTolakJsaPemberi,
+    submissions,
     sertifikatData,
+    catatRevalidasi,
+    startNewDraft,
+    openSubmission,
   } = useProgramStore();
 
   const [activeTab, setActiveTab] = useState<TabType>('semua');
@@ -617,7 +627,6 @@ export default function PemohonMonitoringPage() {
   const [showFilter, setShowFilter] = useState(false);
   const [activePieIndex, setActivePieIndex] = useState<number | undefined>(undefined);
   const [revalidasiModalRowId, setRevalidasiModalRowId] = useState<string | null>(null);
-  const [revalidasiLog, setRevalidasiLog] = useState<Record<string, string[]>>({});
 
   const [timeFilter, setTimeFilter] = useState<TimeFilterType>('bulan');
   const [customRange, setCustomRange] = useState<{ start: string; end: string }>({
@@ -627,42 +636,50 @@ export default function PemohonMonitoringPage() {
   const [showCustomRange, setShowCustomRange] = useState(false);
   const [isTimeDropdownOpen, setIsTimeDropdownOpen] = useState(false);
 
+  // Satu baris per submission yang sudah di-"Request Review" oleh pemohon
+  // (lihat submitToPemberi di store). Draft yang belum pernah disubmit
+  // sengaja tidak muncul di sini.
   const rows: SIKARow[] = useMemo(() => {
-    if (!program || !sika) return [];
+    return submissions.map((sub): SIKARow => {
+      // Ambil tanggal BERLAKU HINGGA yang paling akhir/terjauh di antara semua
+      // isian valid, bukan sekadar entri terakhir dalam array — supaya tidak
+      // tergantung urutan array di store.
+      const validBerlakuHingga = (sub.sika.berlakuHingga || []).filter(
+        (v: string) => !!v && !isNaN(new Date(v).getTime())
+      );
+      const tanggalBerakhirSIKA = validBerlakuHingga.length > 0
+        ? validBerlakuHingga.reduce((latest: string, cur: string) =>
+            new Date(cur) > new Date(latest) ? cur : latest
+          )
+        : '-';
 
-    // Ambil tanggal BERLAKU HINGGA yang paling akhir/terjauh di antara semua
-    // isian valid, bukan sekadar entri terakhir dalam array — supaya tidak
-    // tergantung urutan array di store.
-    const validBerlakuHingga = (sika.berlakuHingga || []).filter(
-      (v: string) => !!v && !isNaN(new Date(v).getTime())
-    );
-    const tanggalBerakhirSIKA = validBerlakuHingga.length > 0
-      ? validBerlakuHingga.reduce((latest: string, cur: string) =>
-          new Date(cur) > new Date(latest) ? cur : latest
-        )
-      : '-';
-
-    return [{
-      id: 'store-1',
-      namaProgram: program.namaPaket || '-',
-      noSIKA: sika.noSIKA || '-',
-      lokasi: program.lokasiKerja || '-',
-      pelaksana: program.pelaksanaPerusahaan || '-',
-      tanggalKontrak: program.tanggalKontrak || '-',
-      tanggalBerakhirSIKA,
-      sertifikatList: sika.sertifikat || [],
-      sikaStatusPemberi,
-      jsaStatusPemberi,
-      sikaStatusPJA,
-      jsaStatusPJA,
-      alasanTolakSika: alasanTolakSikaPemberi,
-      alasanTolakJsa: alasanTolakJsaPemberi,
-      sifatPekerjaan: sika.sifatPekerjaan || '-',
-      identifikasiBahaya: sika.identifikasi || [],
-      createdAt: program.createdAt || new Date().toISOString(),
-      updatedAt: program.updatedAt || new Date().toISOString(),
-    }];
-  }, [program, sika, sikaStatusPemberi, jsaStatusPemberi, sikaStatusPJA, jsaStatusPJA]);
+      return {
+        id: sub.id,
+        namaProgram: sub.program.namaPaket || '-',
+        noSIKA: getNomorSika(sub.sika),
+        lokasi: sub.program.lokasiKerja || '-',
+        pelaksana: sub.program.pelaksanaPerusahaan || '-',
+        tanggalKontrak: sub.program.tanggalKontrak || '-',
+        tanggalBerakhirSIKA,
+        sertifikatList: sub.sika.sertifikat || [],
+        sikaStatusPemberi: sub.sikaStatusPemberi,
+        jsaStatusPemberi: sub.jsaStatusPemberi,
+        sikaStatusPJA: sub.sikaStatusPJA,
+        jsaStatusPJA: sub.jsaStatusPJA,
+        // Digabung dari sisi Pemberi & PJA supaya alasan penolakan tetap
+        // tampil walau yang menolak PJA, bukan cuma Pemberi Kerja.
+        alasanTolakSika: sub.alasanTolakSikaPemberi || sub.alasanTolakSikaPJA,
+        alasanTolakJsa: sub.alasanTolakJsaPemberi || sub.alasanTolakJsaPJA,
+        sifatPekerjaan: sub.sika.sifatPekerjaan || '-',
+        identifikasiBahaya: sub.sika.identifikasi || [],
+        riwayatRevalidasi: sub.riwayatRevalidasi,
+        perubahanStatus: sub.perubahanStatus,
+        alasanTolakPerubahan: sub.alasanTolakPerubahan,
+        createdAt: sub.createdAt,
+        updatedAt: sub.updatedAt,
+      };
+    });
+  }, [submissions]);
 
   const getFinalStatus = (row: SIKARow): OverallStatus =>
     getOverallStatus(row.sikaStatusPemberi, row.jsaStatusPemberi, row.sikaStatusPJA, row.jsaStatusPJA);
@@ -742,6 +759,9 @@ export default function PemohonMonitoringPage() {
   const pieTotal = useMemo(() => statusChartData.reduce((s, d) => s + d.value, 0), [statusChartData]);
 
   const trendData = useMemo(() => {
+    // NOTE: masih dummy/random by design (statistik contoh) — lihat
+    // pembahasan sebelumnya. Ganti ke agregasi asli dari `submissions`
+    // per bulan kalau nanti sudah siap dipakai produksi.
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
     const currentMonth = new Date().getMonth();
     const data = [];
@@ -808,12 +828,24 @@ export default function PemohonMonitoringPage() {
   const handleSubmitRevalidasi = (_data: { catatan: string }) => {
     if (!revalidasiModalRowId) return;
     const todayKey = toDateKey(new Date());
-    setRevalidasiLog((prev) => {
-      const existing = prev[revalidasiModalRowId] || [];
-      if (existing.includes(todayKey)) return prev; // sudah divalidasi hari ini, tidak dobel
-      return { ...prev, [revalidasiModalRowId]: [...existing, todayKey] };
-    });
+    catatRevalidasi(revalidasiModalRowId, todayKey);
     setRevalidasiModalRowId(null);
+  };
+
+  const handleBuatPengajuanBaru = () => {
+    // Kosongkan draft aktif dulu supaya form Program tidak ke-prefill data
+    // pengajuan yang baru saja disubmit, dan supaya pengajuan baru ini
+    // tidak menimpa submission yang sudah ada di riwayat.
+    startNewDraft();
+    router.push('/dashboard/pemohon/program/new');
+  };
+
+  const handleLihatDetail = (rowId: string) => {
+    // Muat snapshot submission ini ke draft aktif supaya halaman Detail
+    // Program (yang membaca program/sika/jsa langsung dari store) otomatis
+    // menampilkan data pengajuan ini.
+    openSubmission(rowId);
+    router.push('/dashboard/pemohon/jsa/detail');
   };
 
   const timeFilterLabels = {
@@ -1242,7 +1274,7 @@ export default function PemohonMonitoringPage() {
               <p className="text-gray-400 text-sm font-medium">Belum ada SIKA yang diajukan</p>
               <p className="text-gray-300 text-xs">Data akan muncul setelah kamu mengisi dan mengajukan dokumen SIKA</p>
               <button
-                onClick={() => router.push('/dashboard/pemohon/program/new')}
+                onClick={handleBuatPengajuanBaru}
                 className="mt-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-lg transition"
               >
                 Buat Pengajuan Baru
@@ -1335,7 +1367,7 @@ export default function PemohonMonitoringPage() {
                           <RevalidasiCell
                             row={row}
                             baseStatus={baseStatus}
-                            validatedDates={revalidasiLog[row.id] || []}
+                            validatedDates={row.riwayatRevalidasi}
                             onAjukan={(rowId) => setRevalidasiModalRowId(rowId)}
                           />
                         </td>
@@ -1345,6 +1377,16 @@ export default function PemohonMonitoringPage() {
                             {hasTolak && (
                               <div className="text-[10px] text-red-500 leading-tight max-w-28">
                                 {row.alasanTolakSika || row.alasanTolakJsa}
+                              </div>
+                            )}
+                            {row.perubahanStatus === 'menunggu' && (
+                              <div className="text-[10px] leading-tight max-w-28" style={{ color: '#F2A900' }}>
+                                Perubahan menunggu approval Pemberi
+                              </div>
+                            )}
+                            {row.perubahanStatus === 'ditolak' && (
+                              <div className="text-[10px] text-red-500 leading-tight max-w-28">
+                                Perubahan ditolak{row.alasanTolakPerubahan ? `: ${row.alasanTolakPerubahan}` : ''}
                               </div>
                             )}
                             {sisaHari !== null && sisaHari <= 7 && (baseStatus === 'aktif' || baseStatus === 'closed') && (
@@ -1361,7 +1403,7 @@ export default function PemohonMonitoringPage() {
                         <td className="px-3 py-3 align-top">
                           <div className="flex flex-col gap-1.5 items-start">
                             <button
-                              onClick={() => router.push('/dashboard/pemohon/jsa/detail')}
+                              onClick={() => handleLihatDetail(row.id)}
                               className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition"
                             >
                               Detail <ChevronRight size={10} />

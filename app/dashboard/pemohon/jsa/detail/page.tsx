@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { Pencil, ChevronLeft, Check } from 'lucide-react';
-import { useProgramStore } from '@/store/programStore';
+import { useProgramStore, getOverallStatus } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
 import jsPDF from 'jspdf';
 import { toPng } from 'html-to-image';
@@ -225,7 +225,14 @@ const getRiskBadgeStyle = (value: string) => {
 
 export default function DetailProgramPage() {
   const router = useRouter();
-  const { program, jsa, sika, setJsaStatus, submitToPemberi, sikaStatusPemberi, jsaStatusPemberi } = useProgramStore();
+  const {
+    program, jsa, sika,
+    setJsaStatus, submitToPemberi,
+    sikaStatusPemberi, jsaStatusPemberi,
+    sikaStatusPJA, jsaStatusPJA,
+    activeSubmissionId, catatRevalidasi,
+    submissions, ajukanPerubahanRevalidasi,
+  } = useProgramStore();
   const { user } = useAuthStore();
   const contentRef = useRef<HTMLDivElement>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -238,6 +245,22 @@ export default function DetailProgramPage() {
 
   const alreadySubmitted = sikaStatusPemberi !== 'draft' || jsaStatusPemberi !== 'draft';
 
+  // Status gabungan submission yang sedang dibuka. Kalau ini sudah pernah
+  // 'aktif' (disetujui Pemberi) atau 'closed' (disetujui Pemberi + PJA) dan
+  // pemohon kembali ke halaman ini — biasanya karena masuk lewat "Perlu
+  // menambah sertifikat, pekerja baru, atau perubahan lain?" di modal
+  // Revalidasi (Data Management) — maka yang relevan bukan "Request Review"
+  // (itu untuk pengajuan yang belum pernah disetujui), melainkan mengirim
+  // ulang data yang sudah diperbarui sebagai konfirmasi revalidasi.
+  const overallStatus = getOverallStatus(sikaStatusPemberi, jsaStatusPemberi, sikaStatusPJA, jsaStatusPJA);
+  const isRevalidasiUpdate = overallStatus === 'aktif' || overallStatus === 'closed';
+
+  // Submission yang sedang aktif dibuka, buat cek apakah perubahan yang
+  // barusan dikirim masih menunggu keputusan Pemberi (mencegah double-submit
+  // & kasih label yang jelas di tombol).
+  const activeSubmission = submissions.find((s) => s.id === activeSubmissionId);
+  const perubahanMenunggu = activeSubmission?.perubahanStatus === 'menunggu';
+
   const handleRequestReview = () => {
     const hasLangkah = jsa?.sections?.some((sec) =>
       sec.rows.some((row) => row.langkah.trim() !== '')
@@ -249,6 +272,28 @@ export default function DetailProgramPage() {
     setJsaStatus('request_review');
     submitToPemberi(user?.name || 'Pemohon');
     alert('SIKA dan JSA berhasil diajukan ke Pemberi Kerja untuk direview.');
+    router.push('/dashboard/pemohon/data-management');
+  };
+
+  // Kirim ulang data yang sudah diperbarui (sertifikat/pekerja baru/dll) ke
+  // Pemberi Kerja sebagai konfirmasi revalidasi — bukan pengajuan baru dari
+  // nol. Sengaja memakai ajukanPerubahanRevalidasi (bukan submitToPemberi):
+  // itu hanya mengubah `perubahanStatus`, tidak menyentuh sikaStatusPemberi/
+  // jsaStatusPemberi, jadi SIKA yang sedang berjalan TETAP berstatus
+  // 'aktif'/'closed' selama menunggu Pemberi meninjau perubahan ini —
+  // bukan balik jadi "Belum berlaku" di Data Management.
+  const handleKirimRevalidasi = () => {
+    const hasLangkah = jsa?.sections?.some((sec) =>
+      sec.rows.some((row) => row.langkah.trim() !== '')
+    );
+    if (!hasLangkah) {
+      alert('Lengkapi form JSA (langkah kerja) terlebih dahulu sebelum mengirim konfirmasi revalidasi.');
+      return;
+    }
+    if (!activeSubmissionId) return;
+    ajukanPerubahanRevalidasi(user?.name || 'Pemohon');
+    catatRevalidasi(activeSubmissionId, new Date().toISOString().split('T')[0]);
+    alert('Konfirmasi revalidasi & perubahan data berhasil dikirim ke Pemberi Kerja untuk direview.');
     router.push('/dashboard/pemohon/data-management');
   };
 
@@ -628,16 +673,29 @@ export default function DetailProgramPage() {
 
       {/* ================= ACTION BUTTONS (tidak diubah) ================= */}
       <div className="flex justify-end gap-2 pb-4 px-6 bg-gray-100">
-        <button
-          onClick={handleRequestReview}
-          disabled={alreadySubmitted}
-          className="flex items-center gap-1.5 bg-green-500 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-green-200"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          {alreadySubmitted ? 'Sudah Diajukan' : 'Request Review'}
-        </button>
+        {isRevalidasiUpdate ? (
+          <button
+            onClick={handleKirimRevalidasi}
+            disabled={perubahanMenunggu}
+            className="flex items-center gap-1.5 bg-green-500 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-green-200"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {perubahanMenunggu ? 'Menunggu Persetujuan Pemberi' : 'Kirim Konfirmasi Revalidasi'}
+          </button>
+        ) : (
+          <button
+            onClick={handleRequestReview}
+            disabled={alreadySubmitted}
+            className="flex items-center gap-1.5 bg-green-500 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-green-200"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {alreadySubmitted ? 'Sudah Diajukan' : 'Request Review'}
+          </button>
+        )}
         <button
           onClick={handleCopyJSA}
           disabled={isExporting}

@@ -164,34 +164,61 @@ type JSAStatus = 'draft' | 'request_review' | 'request_approval' | 'approved' | 
 type SIKAStatus = 'draft' | 'request' | 'approved' | 'rejected';
 type ApprovalStatus = 'draft' | 'request' | 'waiting' | 'approved' | 'rejected';
 
-// Status pengajuan perpanjangan SIKA/JSA yang diajukan pemohon ke Pemberi Kerja.
-// 'none'     -> tidak ada pengajuan perpanjangan yang berjalan
-// 'diajukan' -> menunggu keputusan PJA
-// 'ditolak'  -> PJA menolak, pemohon boleh mengajukan ulang
-// (saat disetujui, statusnya dikembalikan ke 'none' dan tanggal berlaku SIKA langsung diperbarui)
-type PerpanjanganStatus = 'none' | 'diajukan' | 'ditolak';
-
-interface RiwayatPerpanjangan {
-  id: string;
-  tanggalLama: string;
-  tanggalBaru: string;
-  alasan: string;
-  diajukanOleh: string;
-  diajukanPada: string;
-  status: 'disetujui' | 'ditolak';
-  diputuskanOleh?: string;
-  diputuskanPada?: string;
-  alasanTolak?: string;
-}
-
 interface ApprovalLogEntry {
   id: string;
-  dokumen: 'sika' | 'jsa' | 'perpanjangan';
+  dokumen: 'sika' | 'jsa';
   aksi: 'approve' | 'reject' | 'ajukan_ulang';
   oleh: string;
   peran: 'pemberi' | 'pja' | 'pemohon';
   alasan?: string;
   timestamp: string;
+}
+
+/* ============================================================
+ * SubmissionRecord — satu pengajuan SIKA/JSA yang sudah di-submit
+ * (Request Review) oleh pemohon.
+ *
+ * `program` / `sika` / `jsa` di root store (di bawah) tetap dipakai
+ * sebagai "draft aktif" yang sedang diisi lewat halaman Program New →
+ * SIKA New → JSA New → Detail Program — itu tidak berubah.
+ *
+ * Begitu pemohon menekan "Request Review", draft aktif itu di-snapshot
+ * ke dalam `submissions[]` supaya riwayat pengajuan sebelumnya tidak
+ * tertimpa saat pemohon membuat pengajuan baru. Field status approval
+ * (Pemberi/PJA) & riwayat revalidasi disimpan per-submission di sini.
+ * ============================================================ */
+interface SubmissionRecord {
+  id: string;
+  program: ProgramData;
+  sika: SikaData;
+  jsa: JSAData;
+
+  sikaStatusPemberi: ApprovalStatus;
+  jsaStatusPemberi: ApprovalStatus;
+  alasanTolakSikaPemberi: string | null;
+  alasanTolakJsaPemberi: string | null;
+
+  sikaStatusPJA: ApprovalStatus;
+  jsaStatusPJA: ApprovalStatus;
+  alasanTolakSikaPJA: string | null;
+  alasanTolakJsaPJA: string | null;
+
+  // Tanggal-tanggal (YYYY-MM-DD) saat revalidasi harian sudah dikonfirmasi,
+  // maks. 7 hari sejak createdAt. Disimpan di sini (bukan React state lokal)
+  // supaya tidak hilang saat reload / pindah halaman.
+  riwayatRevalidasi: string[];
+
+  // Perubahan data (sertifikat/pekerja baru, dll) yang diajukan pemohon
+  // SETELAH submission ini aktif/closed — lihat "Kirim Konfirmasi Revalidasi"
+  // di Detail Program. Sengaja TERPISAH dari sikaStatusPemberi/jsaStatusPemberi
+  // di atas: submission yang sedang berjalan tidak boleh kehilangan status
+  // 'aktif'/'closed'-nya hanya karena sedang menunggu Pemberi meninjau
+  // perubahan ini.
+  perubahanStatus: 'none' | 'menunggu' | 'disetujui' | 'ditolak';
+  alasanTolakPerubahan: string | null;
+
+  createdAt: string;
+  updatedAt: string;
 }
 
 const defaultSika: SikaData = {
@@ -231,27 +258,40 @@ const makeLogEntry = (
   timestamp: new Date().toISOString(),
 });
 
-// Tanggal berakhir SIKA disimpan sebagai array (berlakuHingga, selaras index dengan
-// tanggalTerbit). Ambil entri terisi terakhir sebagai tanggal berakhir yang berlaku saat ini.
-const ambilTanggalBerakhirTerkini = (berlakuHingga: string[]): string => {
-  const terisi = berlakuHingga.filter((v) => !!v);
-  return terisi.length > 0 ? terisi[terisi.length - 1] : '';
+const makeSubmissionId = () =>
+  `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+/**
+ * Gabungan "Area/Fungsi-NomorUrut" untuk Nomor SIKA, konsisten dipakai di
+ * Detail Program, JSA New, dan Data Management. `sika.noSIKA` TIDAK dipakai
+ * karena field itu tidak pernah diisi lewat form manapun.
+ */
+export const getNomorSika = (
+  sika: Pick<SikaBasicData, 'noSikaAreaFungsi' | 'noSikaNomorUrut'> | null | undefined
+): string => {
+  if (!sika || (!sika.noSikaAreaFungsi && !sika.noSikaNomorUrut)) return '-';
+  return `${sika.noSikaAreaFungsi || '-'}-${sika.noSikaNomorUrut || '-'}`;
 };
 
-// Saat perpanjangan disetujui, ganti entri "berlaku hingga" terakhir dengan tanggal baru.
-// Kalau belum ada entri terisi sama sekali, isi ke slot pertama.
-const terapkanTanggalBerakhirBaru = (berlakuHingga: string[], tanggalBaru: string): string[] => {
-  const next = [...berlakuHingga];
-  let idxTerakhirTerisi = -1;
-  next.forEach((v, i) => {
-    if (v) idxTerakhirTerisi = i;
-  });
-  if (idxTerakhirTerisi === -1) {
-    next[0] = tanggalBaru;
-  } else {
-    next[idxTerakhirTerisi] = tanggalBaru;
-  }
-  return next;
+/**
+ * Status gabungan Pemberi + PJA untuk satu submission. Dipakai bareng oleh
+ * Data Management (badge status per baris) dan Detail Program (menentukan
+ * apakah tombol yang tampil "Request Review" atau "Kirim Konfirmasi
+ * Revalidasi" — lihat catatan di ProgramStore.openSubmission).
+ */
+export type OverallStatus = 'aktif' | 'pending' | 'ditolak' | 'closed' | 'draft';
+
+export const getOverallStatus = (
+  sikaPemberi: ApprovalStatus,
+  jsaPemberi: ApprovalStatus,
+  sikaPJA: ApprovalStatus,
+  jsaPJA: ApprovalStatus
+): OverallStatus => {
+  if (sikaPemberi === 'rejected' || jsaPemberi === 'rejected' || sikaPJA === 'rejected' || jsaPJA === 'rejected') return 'ditolak';
+  if (sikaPJA === 'approved' && jsaPJA === 'approved') return 'closed';
+  if (sikaPemberi === 'approved' && jsaPemberi === 'approved') return 'aktif';
+  if (sikaPemberi === 'request' || jsaPemberi === 'request') return 'pending';
+  return 'draft';
 };
 
 interface ProgramStore {
@@ -270,6 +310,10 @@ interface ProgramStore {
   workPermitList: WorkPermitData[];
   filledSertifikat: string[];
 
+  // Status Pemberi/PJA untuk draft yang SEDANG AKTIF (mirror dari submission
+  // yang activeSubmissionId-nya cocok). Dipertahankan flat di sini supaya
+  // halaman Program New / SIKA New / JSA New / Detail Program tidak perlu
+  // tahu soal `submissions[]` sama sekali.
   sikaStatusPemberi: ApprovalStatus;
   jsaStatusPemberi: ApprovalStatus;
   alasanTolakSikaPemberi: string | null;
@@ -280,14 +324,9 @@ interface ProgramStore {
   alasanTolakSikaPJA: string | null;
   alasanTolakJsaPJA: string | null;
 
-  // --- Perpanjangan SIKA/JSA ---
-  statusPerpanjangan: PerpanjanganStatus;
-  tanggalKontrakBaruPerpanjangan: string | null;
-  alasanPerpanjangan: string | null;
-  alasanTolakPerpanjangan: string | null;
-  diajukanPerpanjanganOleh: string | null;
-  diajukanPerpanjanganPada: string | null;
-  riwayatPerpanjangan: RiwayatPerpanjangan[];
+  // --- Multi-pengajuan (Data Management) ---
+  submissions: SubmissionRecord[];
+  activeSubmissionId: string | null;
 
   approvalHistory: ApprovalLogEntry[];
   sertifikatData: Record<string, SertifikatData>;
@@ -317,453 +356,545 @@ interface ProgramStore {
   setGasMonitoringData: (key: string, data: GasMonitoringData) => void;
   removeGasMonitoringData: (key: string) => void;
 
+  // Submit draft aktif → dibuat/diupdate sebagai SubmissionRecord di `submissions[]`
   submitToPemberi: (oleh: string) => void;
-  ajukanUlangSika: (oleh: string) => void;
-  ajukanUlangJsa: (oleh: string) => void;
+  ajukanUlangSika: (oleh: string, id?: string) => void;
+  ajukanUlangJsa: (oleh: string, id?: string) => void;
 
-  approveSikaPemberi: (oleh: string) => void;
-  rejectSikaPemberi: (oleh: string, alasan: string) => void;
-  approveJsaPemberi: (oleh: string) => void;
-  rejectJsaPemberi: (oleh: string, alasan: string) => void;
+  // `id` opsional: default ke activeSubmissionId (draft yang sedang dibuka).
+  // Data Management (yang menampilkan banyak baris) sebaiknya selalu kirim `id` eksplisit.
+  approveSikaPemberi: (oleh: string, id?: string) => void;
+  rejectSikaPemberi: (oleh: string, alasan: string, id?: string) => void;
+  approveJsaPemberi: (oleh: string, id?: string) => void;
+  rejectJsaPemberi: (oleh: string, alasan: string, id?: string) => void;
 
-  approveSikaPJA: (oleh: string) => void;
-  rejectSikaPJA: (oleh: string, alasan: string) => void;
-  approveJsaPJA: (oleh: string) => void;
-  rejectJsaPJA: (oleh: string, alasan: string) => void;
+  approveSikaPJA: (oleh: string, id?: string) => void;
+  rejectSikaPJA: (oleh: string, alasan: string, id?: string) => void;
+  approveJsaPJA: (oleh: string, id?: string) => void;
+  rejectJsaPJA: (oleh: string, alasan: string, id?: string) => void;
 
-  // --- Aksi perpanjangan ---
-  ajukanPerpanjangan: (oleh: string, tanggalKontrakBaru: string, alasan: string) => void;
-  approvePerpanjangan: (oleh: string) => void;
-  rejectPerpanjangan: (oleh: string, alasan: string) => void;
+  // Kirim update data (sertifikat/pekerja baru, dll) untuk submission yang
+  // SUDAH aktif/closed, sebagai konfirmasi revalidasi ke Pemberi Kerja.
+  // Sengaja TIDAK memakai submitToPemberi — itu untuk pengajuan pertama kali
+  // dan akan reset status Pemberi ke 'request' sehingga submission tampak
+  // "belum berlaku" lagi. Di sini hanya `perubahanStatus` yang berubah;
+  // sikaStatusPemberi/jsaStatusPemberi tetap 'approved' sepanjang proses.
+  ajukanPerubahanRevalidasi: (oleh: string, id?: string) => void;
+  approvePerubahanRevalidasi: (oleh: string, id?: string) => void;
+  rejectPerubahanRevalidasi: (oleh: string, alasan: string, id?: string) => void;
+
+  // Catat revalidasi harian untuk submission tertentu (idempotent per tanggal)
+  catatRevalidasi: (id: string, tanggalKey: string) => void;
+
+  // Kosongkan draft aktif (program/sika/jsa + status) tanpa menghapus
+  // riwayat `submissions[]` — dipanggil sebelum mulai pengajuan baru.
+  startNewDraft: () => void;
+
+  // Muat snapshot sebuah submission lama ke field draft aktif (program/sika/jsa
+  // + status Pemberi/PJA), supaya halaman yang membaca state flat (Detail
+  // Program, dst) otomatis menampilkan submission itu tanpa perlu diubah.
+  // Dipanggil sebelum navigasi ke halaman Detail dari baris tabel manapun
+  // di Data Management.
+  openSubmission: (id: string) => void;
 
   reset: () => void;
 }
 
 export const useProgramStore = create<ProgramStore>()(
   persist(
-    (set, get) => ({
-      program: null,
-      jsa: null,
-      sika: null,
-      aktivitasList: [],
-      pendingRTL: null,
-      rtlList: [],
-      jsaStatus: 'draft',
-      sikaStatus: 'draft',
-      alasanTolakJSA: null,
-      alasanTolakSIKA: null,
-      approveDate: null,
-      savedWPs: [],
-      workPermitList: [],
-      filledSertifikat: [],
-
-      sikaStatusPemberi: 'draft',
-      jsaStatusPemberi: 'draft',
-      alasanTolakSikaPemberi: null,
-      alasanTolakJsaPemberi: null,
-
-      sikaStatusPJA: 'draft',
-      jsaStatusPJA: 'draft',
-      alasanTolakSikaPJA: null,
-      alasanTolakJsaPJA: null,
-
-      statusPerpanjangan: 'none',
-      tanggalKontrakBaruPerpanjangan: null,
-      alasanPerpanjangan: null,
-      alasanTolakPerpanjangan: null,
-      diajukanPerpanjanganOleh: null,
-      diajukanPerpanjanganPada: null,
-      riwayatPerpanjangan: [],
-
-      approvalHistory: [],
-      sertifikatData: {},
-      gasMonitoringData: {},
-
-      // NOTE: createdAt/updatedAt kini diisi otomatis di sini, bukan dari caller.
-      // - createdAt: dipertahankan dari state sebelumnya kalau sudah ada (diisi sekali saat program pertama kali dibuat)
-      // - updatedAt: selalu diperbarui setiap kali setProgram dipanggil
-      setProgram: (data) =>
+    (set, get) => {
+      // ---- helper internal: patch satu SubmissionRecord di array ----
+      const patchSubmission = (id: string, patch: Partial<SubmissionRecord>) => {
         set((state) => ({
-          program: {
-            ...data,
-            createdAt: state.program?.createdAt ?? new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        })),
-
-      setJSA: (data) => set({ jsa: data }),
-      setSika: (data) => set({ sika: data }),
-
-      setSikaBasic: (data) =>
-        set((state) => ({
-          sika: { ...(state.sika ?? defaultSika), ...data },
-        })),
-
-      setSikaPemeriksaan: (data) =>
-        set((state) => ({
-          sika: { ...(state.sika ?? defaultSika), ...data },
-        })),
-
-      addAktivitas: (data) =>
-        set((state) => ({
-          aktivitasList: [
-            ...state.aktivitasList,
-            { no: state.aktivitasList.length + 1, ...data },
-          ],
-        })),
-
-      removeAktivitas: (no) =>
-        set((state) => ({
-          aktivitasList: state.aktivitasList
-            .filter((a) => a.no !== no)
-            .map((a, i) => ({ ...a, no: i + 1 })),
-        })),
-
-      setPendingRTL: (data) => set({ pendingRTL: data }),
-
-      saveRTL: (data) =>
-        set((state) => ({
-          rtlList: [
-            ...state.rtlList.filter((r) => r.aktivitasNo !== data.aktivitasNo),
-            data,
-          ],
-          pendingRTL: null,
-        })),
-
-      setJsaStatus: (status) => set({ jsaStatus: status }),
-      setSikaStatus: (status) => set({ sikaStatus: status }),
-
-      setAlasanTolak: (type, alasan) =>
-        set(type === 'jsa' ? { alasanTolakJSA: alasan } : { alasanTolakSIKA: alasan }),
-
-      setApproveDate: (date) => set({ approveDate: date }),
-
-      saveWPs: (wps) => set({ savedWPs: wps }),
-
-      addWorkPermit: (data) =>
-        set((state) => ({
-          workPermitList: [
-            ...state.workPermitList,
-            { no: state.workPermitList.length + 1, ...data },
-          ],
-        })),
-
-      updateWorkPermitStatus: (noWP, status) =>
-        set((state) => ({
-          workPermitList: state.workPermitList.map((w) =>
-            w.noWP === noWP ? { ...w, status } : w
+          submissions: state.submissions.map((s) =>
+            s.id === id ? { ...s, ...patch, updatedAt: new Date().toISOString() } : s
           ),
-        })),
+        }));
+      };
 
-      removeWorkPermit: (no) =>
-        set((state) => ({
-          workPermitList: state.workPermitList
-            .filter((w) => w.no !== no)
-            .map((w, i) => ({ ...w, no: i + 1 })),
-        })),
+      // ---- helper internal: approve/reject dengan guard + log + mirror ----
+      const applyApproval = (
+        id: string | undefined,
+        dokumen: 'sika' | 'jsa',
+        peran: 'pemberi' | 'pja',
+        aksi: 'approve' | 'reject',
+        oleh: string,
+        alasan: string | undefined,
+        guardAndPatch: (record: SubmissionRecord) => Partial<SubmissionRecord> | null
+      ) => {
+        const state = get();
+        const targetId = id ?? state.activeSubmissionId;
+        if (!targetId) return;
+        const record = state.submissions.find((s) => s.id === targetId);
+        if (!record) return;
 
-      markSertifikatFilled: (nama) =>
-        set((state) => ({
-          filledSertifikat: state.filledSertifikat.includes(nama)
-            ? state.filledSertifikat
-            : [...state.filledSertifikat, nama],
-        })),
+        const patch = guardAndPatch(record);
+        if (!patch) return;
 
-      unmarkSertifikat: (nama) =>
-        set((state) => ({
-          filledSertifikat: state.filledSertifikat.filter((v) => v !== nama),
-        })),
+        patchSubmission(targetId, patch);
+        set((s) => ({
+          // Mirror ke field flat HANYA kalau yang di-approve/reject adalah
+          // draft yang sedang aktif dibuka — supaya status program lain
+          // yang kebetulan sedang tidak dibuka tidak ikut "berubah" di layar.
+          ...(targetId === s.activeSubmissionId ? (patch as Partial<ProgramStore>) : {}),
+          approvalHistory: [...s.approvalHistory, makeLogEntry({ dokumen, aksi, oleh, peran, alasan })],
+        }));
+      };
 
-      setSertifikatData: (nama, data, diisiOleh) =>
-        set((state) => ({
-          sertifikatData: {
-            ...state.sertifikatData,
-            [nama]: {
-              nama,
-              data,
-              diisiOleh,
-              diisiPada: new Date().toISOString(),
+      return {
+        program: null,
+        jsa: null,
+        sika: null,
+        aktivitasList: [],
+        pendingRTL: null,
+        rtlList: [],
+        jsaStatus: 'draft',
+        sikaStatus: 'draft',
+        alasanTolakJSA: null,
+        alasanTolakSIKA: null,
+        approveDate: null,
+        savedWPs: [],
+        workPermitList: [],
+        filledSertifikat: [],
+
+        sikaStatusPemberi: 'draft',
+        jsaStatusPemberi: 'draft',
+        alasanTolakSikaPemberi: null,
+        alasanTolakJsaPemberi: null,
+
+        sikaStatusPJA: 'draft',
+        jsaStatusPJA: 'draft',
+        alasanTolakSikaPJA: null,
+        alasanTolakJsaPJA: null,
+
+        submissions: [],
+        activeSubmissionId: null,
+
+        approvalHistory: [],
+        sertifikatData: {},
+        gasMonitoringData: {},
+
+        // createdAt dipertahankan dari state sebelumnya kalau sudah ada (diisi
+        // sekali saat program pertama kali dibuat), updatedAt selalu diperbarui.
+        setProgram: (data) =>
+          set((state) => ({
+            program: {
+              ...data,
+              createdAt: state.program?.createdAt ?? new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
             },
-          },
-        })),
+          })),
 
-      removeSertifikatData: (nama) =>
-        set((state) => {
-          const next = { ...state.sertifikatData };
-          delete next[nama];
-          return { sertifikatData: next };
-        }),
+        setJSA: (data) => set({ jsa: data }),
+        setSika: (data) => set({ sika: data }),
 
-      setGasMonitoringData: (key, data) =>
-        set((state) => ({
-          gasMonitoringData: { ...state.gasMonitoringData, [key]: data },
-        })),
+        setSikaBasic: (data) =>
+          set((state) => ({
+            sika: { ...(state.sika ?? defaultSika), ...data },
+          })),
 
-      removeGasMonitoringData: (key) =>
-        set((state) => {
-          const next = { ...state.gasMonitoringData };
-          delete next[key];
-          return { gasMonitoringData: next };
-        }),
+        setSikaPemeriksaan: (data) =>
+          set((state) => ({
+            sika: { ...(state.sika ?? defaultSika), ...data },
+          })),
 
-      submitToPemberi: (oleh) =>
-        set((state) => ({
-          sikaStatusPemberi: 'request',
-          jsaStatusPemberi: 'request',
-          approvalHistory: [
-            ...state.approvalHistory,
-            makeLogEntry({ dokumen: 'sika', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
-            makeLogEntry({ dokumen: 'jsa', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
-          ],
-        })),
+        addAktivitas: (data) =>
+          set((state) => ({
+            aktivitasList: [
+              ...state.aktivitasList,
+              { no: state.aktivitasList.length + 1, ...data },
+            ],
+          })),
 
-      ajukanUlangSika: (oleh) =>
-        set((state) => ({
-          sikaStatusPemberi: 'request',
-          alasanTolakSikaPemberi: null,
-          approvalHistory: [
-            ...state.approvalHistory,
-            makeLogEntry({ dokumen: 'sika', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
-          ],
-        })),
+        removeAktivitas: (no) =>
+          set((state) => ({
+            aktivitasList: state.aktivitasList
+              .filter((a) => a.no !== no)
+              .map((a, i) => ({ ...a, no: i + 1 })),
+          })),
 
-      ajukanUlangJsa: (oleh) =>
-        set((state) => ({
-          jsaStatusPemberi: 'request',
-          alasanTolakJsaPemberi: null,
-          approvalHistory: [
-            ...state.approvalHistory,
-            makeLogEntry({ dokumen: 'jsa', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
-          ],
-        })),
+        setPendingRTL: (data) => set({ pendingRTL: data }),
 
-      approveSikaPemberi: (oleh) => {
-        const state = get();
-        if (state.sikaStatusPemberi === 'approved') return;
-        set({
-          sikaStatusPemberi: 'approved',
-          alasanTolakSikaPemberi: null,
-          sikaStatusPJA: 'waiting',
-          approvalHistory: [
-            ...state.approvalHistory,
-            makeLogEntry({ dokumen: 'sika', aksi: 'approve', oleh, peran: 'pemberi' }),
-          ],
-        });
-      },
+        saveRTL: (data) =>
+          set((state) => ({
+            rtlList: [
+              ...state.rtlList.filter((r) => r.aktivitasNo !== data.aktivitasNo),
+              data,
+            ],
+            pendingRTL: null,
+          })),
 
-      rejectSikaPemberi: (oleh, alasan) => {
-        const state = get();
-        if (state.sikaStatusPemberi === 'approved') return;
-        set({
-          sikaStatusPemberi: 'rejected',
-          alasanTolakSikaPemberi: alasan,
-          sikaStatusPJA: 'draft',
-          approvalHistory: [
-            ...state.approvalHistory,
-            makeLogEntry({ dokumen: 'sika', aksi: 'reject', oleh, peran: 'pemberi', alasan }),
-          ],
-        });
-      },
+        setJsaStatus: (status) => set({ jsaStatus: status }),
+        setSikaStatus: (status) => set({ sikaStatus: status }),
 
-      approveJsaPemberi: (oleh) => {
-        const state = get();
-        if (state.sikaStatusPemberi !== 'approved') return;
-        if (state.jsaStatusPemberi === 'approved') return;
-        set({
-          jsaStatusPemberi: 'approved',
-          alasanTolakJsaPemberi: null,
-          jsaStatusPJA: 'waiting',
-          approvalHistory: [
-            ...state.approvalHistory,
-            makeLogEntry({ dokumen: 'jsa', aksi: 'approve', oleh, peran: 'pemberi' }),
-          ],
-        });
-      },
+        setAlasanTolak: (type, alasan) =>
+          set(type === 'jsa' ? { alasanTolakJSA: alasan } : { alasanTolakSIKA: alasan }),
 
-      rejectJsaPemberi: (oleh, alasan) => {
-        const state = get();
-        if (state.jsaStatusPemberi === 'approved') return;
-        set({
-          jsaStatusPemberi: 'rejected',
-          alasanTolakJsaPemberi: alasan,
-          jsaStatusPJA: 'draft',
-          approvalHistory: [
-            ...state.approvalHistory,
-            makeLogEntry({ dokumen: 'jsa', aksi: 'reject', oleh, peran: 'pemberi', alasan }),
-          ],
-        });
-      },
+        setApproveDate: (date) => set({ approveDate: date }),
 
-      approveSikaPJA: (oleh) => {
-        const state = get();
-        if (state.sikaStatusPJA === 'approved') return;
-        if (state.sikaStatusPemberi !== 'approved') return;
-        set({
-          sikaStatusPJA: 'approved',
-          alasanTolakSikaPJA: null,
-          approvalHistory: [
-            ...state.approvalHistory,
-            makeLogEntry({ dokumen: 'sika', aksi: 'approve', oleh, peran: 'pja' }),
-          ],
-        });
-      },
+        saveWPs: (wps) => set({ savedWPs: wps }),
 
-      rejectSikaPJA: (oleh, alasan) => {
-        const state = get();
-        if (state.sikaStatusPJA === 'approved') return;
-        set({
-          sikaStatusPJA: 'rejected',
-          alasanTolakSikaPJA: alasan,
-          approvalHistory: [
-            ...state.approvalHistory,
-            makeLogEntry({ dokumen: 'sika', aksi: 'reject', oleh, peran: 'pja', alasan }),
-          ],
-        });
-      },
+        addWorkPermit: (data) =>
+          set((state) => ({
+            workPermitList: [
+              ...state.workPermitList,
+              { no: state.workPermitList.length + 1, ...data },
+            ],
+          })),
 
-      approveJsaPJA: (oleh) => {
-        const state = get();
-        if (state.jsaStatusPJA === 'approved') return;
-        if (state.jsaStatusPemberi !== 'approved') return;
-        set({
-          jsaStatusPJA: 'approved',
-          alasanTolakJsaPJA: null,
-          approvalHistory: [
-            ...state.approvalHistory,
-            makeLogEntry({ dokumen: 'jsa', aksi: 'approve', oleh, peran: 'pja' }),
-          ],
-        });
-      },
+        updateWorkPermitStatus: (noWP, status) =>
+          set((state) => ({
+            workPermitList: state.workPermitList.map((w) =>
+              w.noWP === noWP ? { ...w, status } : w
+            ),
+          })),
 
-      rejectJsaPJA: (oleh, alasan) => {
-        const state = get();
-        if (state.jsaStatusPJA === 'approved') return;
-        set({
-          jsaStatusPJA: 'rejected',
-          alasanTolakJsaPJA: alasan,
-          approvalHistory: [
-            ...state.approvalHistory,
-            makeLogEntry({ dokumen: 'jsa', aksi: 'reject', oleh, peran: 'pja', alasan }),
-          ],
-        });
-      },
+        removeWorkPermit: (no) =>
+          set((state) => ({
+            workPermitList: state.workPermitList
+              .filter((w) => w.no !== no)
+              .map((w, i) => ({ ...w, no: i + 1 })),
+          })),
 
-      // Pemohon mengajukan perpanjangan (dipanggil dari halaman monitoring, H-2 sebelum berakhir)
-      ajukanPerpanjangan: (oleh, tanggalKontrakBaru, alasan) => {
-        const state = get();
-        if (state.statusPerpanjangan === 'diajukan') return;
-        set({
-          statusPerpanjangan: 'diajukan',
-          tanggalKontrakBaruPerpanjangan: tanggalKontrakBaru,
-          alasanPerpanjangan: alasan,
-          alasanTolakPerpanjangan: null,
-          diajukanPerpanjanganOleh: oleh,
-          diajukanPerpanjanganPada: new Date().toISOString(),
-          approvalHistory: [
-            ...state.approvalHistory,
-            makeLogEntry({ dokumen: 'perpanjangan', aksi: 'ajukan_ulang', oleh, peran: 'pemohon', alasan }),
-          ],
-        });
-      },
+        markSertifikatFilled: (nama) =>
+          set((state) => ({
+            filledSertifikat: state.filledSertifikat.includes(nama)
+              ? state.filledSertifikat
+              : [...state.filledSertifikat, nama],
+          })),
 
-      // Pemberi Kerja menyetujui: tanggal berlaku SIKA diperbarui, status kembali normal (aktif)
-      approvePerpanjangan: (oleh) => {
-        const state = get();
-        if (state.statusPerpanjangan !== 'diajukan') return;
-        const tanggalLama = state.sika ? ambilTanggalBerakhirTerkini(state.sika.berlakuHingga) : '';
-        const tanggalBaru = state.tanggalKontrakBaruPerpanjangan ?? '';
-        const riwayat: RiwayatPerpanjangan = {
-          id: `perpanjangan-${Date.now()}`,
-          tanggalLama,
-          tanggalBaru,
-          alasan: state.alasanPerpanjangan ?? '',
-          diajukanOleh: state.diajukanPerpanjanganOleh ?? '',
-          diajukanPada: state.diajukanPerpanjanganPada ?? '',
-          status: 'disetujui',
-          diputuskanOleh: oleh,
-          diputuskanPada: new Date().toISOString(),
-        };
-        set({
-          statusPerpanjangan: 'none',
-          sika: state.sika && tanggalBaru
-            ? { ...state.sika, berlakuHingga: terapkanTanggalBerakhirBaru(state.sika.berlakuHingga, tanggalBaru) }
-            : state.sika,
-          tanggalKontrakBaruPerpanjangan: null,
-          alasanPerpanjangan: null,
-          alasanTolakPerpanjangan: null,
-          diajukanPerpanjanganOleh: null,
-          diajukanPerpanjanganPada: null,
-          riwayatPerpanjangan: [...state.riwayatPerpanjangan, riwayat],
-          approvalHistory: [
-            ...state.approvalHistory,
-            makeLogEntry({ dokumen: 'perpanjangan', aksi: 'approve', oleh, peran: 'pemberi' }),
-          ],
-        });
-      },
+        unmarkSertifikat: (nama) =>
+          set((state) => ({
+            filledSertifikat: state.filledSertifikat.filter((v) => v !== nama),
+          })),
 
-      // Pemberi Kerja menolak: pemohon bisa mengajukan ulang dari halaman monitoring
-      rejectPerpanjangan: (oleh, alasan) => {
-        const state = get();
-        if (state.statusPerpanjangan !== 'diajukan') return;
-        const riwayat: RiwayatPerpanjangan = {
-          id: `perpanjangan-${Date.now()}`,
-          tanggalLama: state.sika ? ambilTanggalBerakhirTerkini(state.sika.berlakuHingga) : '',
-          tanggalBaru: state.tanggalKontrakBaruPerpanjangan ?? '',
-          alasan: state.alasanPerpanjangan ?? '',
-          diajukanOleh: state.diajukanPerpanjanganOleh ?? '',
-          diajukanPada: state.diajukanPerpanjanganPada ?? '',
-          status: 'ditolak',
-          diputuskanOleh: oleh,
-          diputuskanPada: new Date().toISOString(),
-          alasanTolak: alasan,
-        };
-        set({
-          statusPerpanjangan: 'ditolak',
-          alasanTolakPerpanjangan: alasan,
-          riwayatPerpanjangan: [...state.riwayatPerpanjangan, riwayat],
-          approvalHistory: [
-            ...state.approvalHistory,
-            makeLogEntry({ dokumen: 'perpanjangan', aksi: 'reject', oleh, peran: 'pemberi', alasan }),
-          ],
-        });
-      },
+        setSertifikatData: (nama, data, diisiOleh) =>
+          set((state) => ({
+            sertifikatData: {
+              ...state.sertifikatData,
+              [nama]: {
+                nama,
+                data,
+                diisiOleh,
+                diisiPada: new Date().toISOString(),
+              },
+            },
+          })),
 
-      reset: () =>
-        set({
-          program: null,
-          jsa: null,
-          sika: null,
-          aktivitasList: [],
-          pendingRTL: null,
-          rtlList: [],
-          jsaStatus: 'draft',
-          sikaStatus: 'draft',
-          alasanTolakJSA: null,
-          alasanTolakSIKA: null,
-          approveDate: null,
-          savedWPs: [],
-          workPermitList: [],
-          filledSertifikat: [],
-          sikaStatusPemberi: 'draft',
-          jsaStatusPemberi: 'draft',
-          alasanTolakSikaPemberi: null,
-          alasanTolakJsaPemberi: null,
-          sikaStatusPJA: 'draft',
-          jsaStatusPJA: 'draft',
-          alasanTolakSikaPJA: null,
-          alasanTolakJsaPJA: null,
-          statusPerpanjangan: 'none',
-          tanggalKontrakBaruPerpanjangan: null,
-          alasanPerpanjangan: null,
-          alasanTolakPerpanjangan: null,
-          diajukanPerpanjanganOleh: null,
-          diajukanPerpanjanganPada: null,
-          riwayatPerpanjangan: [],
-          approvalHistory: [],
-          sertifikatData: {},
-          gasMonitoringData: {},
-        }),
-    }),
+        removeSertifikatData: (nama) =>
+          set((state) => {
+            const next = { ...state.sertifikatData };
+            delete next[nama];
+            return { sertifikatData: next };
+          }),
+
+        setGasMonitoringData: (key, data) =>
+          set((state) => ({
+            gasMonitoringData: { ...state.gasMonitoringData, [key]: data },
+          })),
+
+        removeGasMonitoringData: (key) =>
+          set((state) => {
+            const next = { ...state.gasMonitoringData };
+            delete next[key];
+            return { gasMonitoringData: next };
+          }),
+
+        submitToPemberi: (oleh) => {
+          const state = get();
+          if (!state.program || !state.sika || !state.jsa) return;
+
+          const now = new Date().toISOString();
+          const existingId =
+            state.activeSubmissionId &&
+            state.submissions.some((s) => s.id === state.activeSubmissionId)
+              ? state.activeSubmissionId
+              : null;
+
+          let submissions: SubmissionRecord[];
+          const targetId = existingId ?? makeSubmissionId();
+
+          if (existingId) {
+            // Submit ulang setelah revisi: perbarui snapshot & reset status ke 'request'
+            submissions = state.submissions.map((s) =>
+              s.id === existingId
+                ? {
+                    ...s,
+                    program: state.program!,
+                    sika: state.sika!,
+                    jsa: state.jsa!,
+                    sikaStatusPemberi: 'request',
+                    jsaStatusPemberi: 'request',
+                    updatedAt: now,
+                  }
+                : s
+            );
+          } else {
+            const record: SubmissionRecord = {
+              id: targetId,
+              program: state.program,
+              sika: state.sika,
+              jsa: state.jsa,
+              sikaStatusPemberi: 'request',
+              jsaStatusPemberi: 'request',
+              alasanTolakSikaPemberi: null,
+              alasanTolakJsaPemberi: null,
+              sikaStatusPJA: 'draft',
+              jsaStatusPJA: 'draft',
+              alasanTolakSikaPJA: null,
+              alasanTolakJsaPJA: null,
+              riwayatRevalidasi: [],
+              perubahanStatus: 'none',
+              alasanTolakPerubahan: null,
+              createdAt: now,
+              updatedAt: now,
+            };
+            submissions = [...state.submissions, record];
+          }
+
+          set({
+            submissions,
+            activeSubmissionId: targetId,
+            sikaStatusPemberi: 'request',
+            jsaStatusPemberi: 'request',
+            approvalHistory: [
+              ...state.approvalHistory,
+              makeLogEntry({ dokumen: 'sika', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
+              makeLogEntry({ dokumen: 'jsa', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
+            ],
+          });
+        },
+
+        ajukanUlangSika: (oleh, id) => {
+          const state = get();
+          const targetId = id ?? state.activeSubmissionId;
+          if (targetId) {
+            patchSubmission(targetId, { sikaStatusPemberi: 'request', alasanTolakSikaPemberi: null });
+          }
+          set((s) => ({
+            ...(!targetId || targetId === s.activeSubmissionId
+              ? { sikaStatusPemberi: 'request' as ApprovalStatus, alasanTolakSikaPemberi: null }
+              : {}),
+            approvalHistory: [
+              ...s.approvalHistory,
+              makeLogEntry({ dokumen: 'sika', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
+            ],
+          }));
+        },
+
+        ajukanUlangJsa: (oleh, id) => {
+          const state = get();
+          const targetId = id ?? state.activeSubmissionId;
+          if (targetId) {
+            patchSubmission(targetId, { jsaStatusPemberi: 'request', alasanTolakJsaPemberi: null });
+          }
+          set((s) => ({
+            ...(!targetId || targetId === s.activeSubmissionId
+              ? { jsaStatusPemberi: 'request' as ApprovalStatus, alasanTolakJsaPemberi: null }
+              : {}),
+            approvalHistory: [
+              ...s.approvalHistory,
+              makeLogEntry({ dokumen: 'jsa', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
+            ],
+          }));
+        },
+
+        approveSikaPemberi: (oleh, id) =>
+          applyApproval(id, 'sika', 'pemberi', 'approve', oleh, undefined, (record) =>
+            record.sikaStatusPemberi === 'approved'
+              ? null
+              : { sikaStatusPemberi: 'approved', alasanTolakSikaPemberi: null, sikaStatusPJA: 'waiting' }
+          ),
+
+        rejectSikaPemberi: (oleh, alasan, id) =>
+          applyApproval(id, 'sika', 'pemberi', 'reject', oleh, alasan, (record) =>
+            record.sikaStatusPemberi === 'approved'
+              ? null
+              : { sikaStatusPemberi: 'rejected', alasanTolakSikaPemberi: alasan, sikaStatusPJA: 'draft' }
+          ),
+
+        approveJsaPemberi: (oleh, id) =>
+          applyApproval(id, 'jsa', 'pemberi', 'approve', oleh, undefined, (record) =>
+            record.sikaStatusPemberi !== 'approved' || record.jsaStatusPemberi === 'approved'
+              ? null
+              : { jsaStatusPemberi: 'approved', alasanTolakJsaPemberi: null, jsaStatusPJA: 'waiting' }
+          ),
+
+        rejectJsaPemberi: (oleh, alasan, id) =>
+          applyApproval(id, 'jsa', 'pemberi', 'reject', oleh, alasan, (record) =>
+            record.jsaStatusPemberi === 'approved'
+              ? null
+              : { jsaStatusPemberi: 'rejected', alasanTolakJsaPemberi: alasan, jsaStatusPJA: 'draft' }
+          ),
+
+        approveSikaPJA: (oleh, id) =>
+          applyApproval(id, 'sika', 'pja', 'approve', oleh, undefined, (record) =>
+            record.sikaStatusPJA === 'approved' || record.sikaStatusPemberi !== 'approved'
+              ? null
+              : { sikaStatusPJA: 'approved', alasanTolakSikaPJA: null }
+          ),
+
+        rejectSikaPJA: (oleh, alasan, id) =>
+          applyApproval(id, 'sika', 'pja', 'reject', oleh, alasan, (record) =>
+            record.sikaStatusPJA === 'approved'
+              ? null
+              : { sikaStatusPJA: 'rejected', alasanTolakSikaPJA: alasan }
+          ),
+
+        approveJsaPJA: (oleh, id) =>
+          applyApproval(id, 'jsa', 'pja', 'approve', oleh, undefined, (record) =>
+            record.jsaStatusPJA === 'approved' || record.jsaStatusPemberi !== 'approved'
+              ? null
+              : { jsaStatusPJA: 'approved', alasanTolakJsaPJA: null }
+          ),
+
+        rejectJsaPJA: (oleh, alasan, id) =>
+          applyApproval(id, 'jsa', 'pja', 'reject', oleh, alasan, (record) =>
+            record.jsaStatusPJA === 'approved'
+              ? null
+              : { jsaStatusPJA: 'rejected', alasanTolakJsaPJA: alasan }
+          ),
+
+        ajukanPerubahanRevalidasi: (oleh, id) => {
+          const state = get();
+          const targetId = id ?? state.activeSubmissionId;
+          if (!targetId || !state.program || !state.sika || !state.jsa) return;
+          const record = state.submissions.find((s) => s.id === targetId);
+          if (!record) return;
+
+          patchSubmission(targetId, {
+            program: state.program,
+            sika: state.sika,
+            jsa: state.jsa,
+            perubahanStatus: 'menunggu',
+            alasanTolakPerubahan: null,
+          });
+          set((s) => ({
+            approvalHistory: [
+              ...s.approvalHistory,
+              makeLogEntry({ dokumen: 'sika', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
+            ],
+          }));
+        },
+
+        approvePerubahanRevalidasi: (oleh, id) => {
+          const state = get();
+          const targetId = id ?? state.activeSubmissionId;
+          if (!targetId) return;
+          const record = state.submissions.find((s) => s.id === targetId);
+          if (!record || record.perubahanStatus !== 'menunggu') return;
+
+          patchSubmission(targetId, { perubahanStatus: 'disetujui', alasanTolakPerubahan: null });
+          set((s) => ({
+            approvalHistory: [
+              ...s.approvalHistory,
+              makeLogEntry({ dokumen: 'sika', aksi: 'approve', oleh, peran: 'pemberi' }),
+            ],
+          }));
+        },
+
+        rejectPerubahanRevalidasi: (oleh, alasan, id) => {
+          const state = get();
+          const targetId = id ?? state.activeSubmissionId;
+          if (!targetId) return;
+          const record = state.submissions.find((s) => s.id === targetId);
+          if (!record || record.perubahanStatus !== 'menunggu') return;
+
+          patchSubmission(targetId, { perubahanStatus: 'ditolak', alasanTolakPerubahan: alasan });
+          set((s) => ({
+            approvalHistory: [
+              ...s.approvalHistory,
+              makeLogEntry({ dokumen: 'sika', aksi: 'reject', oleh, peran: 'pemberi', alasan }),
+            ],
+          }));
+        },
+
+        catatRevalidasi: (id, tanggalKey) =>
+          set((state) => ({
+            submissions: state.submissions.map((s) =>
+              s.id !== id || s.riwayatRevalidasi.includes(tanggalKey)
+                ? s
+                : {
+                    ...s,
+                    riwayatRevalidasi: [...s.riwayatRevalidasi, tanggalKey],
+                    updatedAt: new Date().toISOString(),
+                  }
+            ),
+          })),
+
+        startNewDraft: () =>
+          set({
+            program: null,
+            jsa: null,
+            sika: null,
+            activeSubmissionId: null,
+            jsaStatus: 'draft',
+            sikaStatus: 'draft',
+            alasanTolakJSA: null,
+            alasanTolakSIKA: null,
+            filledSertifikat: [],
+            sikaStatusPemberi: 'draft',
+            jsaStatusPemberi: 'draft',
+            alasanTolakSikaPemberi: null,
+            alasanTolakJsaPemberi: null,
+            sikaStatusPJA: 'draft',
+            jsaStatusPJA: 'draft',
+            alasanTolakSikaPJA: null,
+            alasanTolakJsaPJA: null,
+          }),
+
+        openSubmission: (id) => {
+          const state = get();
+          const record = state.submissions.find((s) => s.id === id);
+          if (!record) return;
+          set({
+            activeSubmissionId: record.id,
+            program: record.program,
+            sika: record.sika,
+            jsa: record.jsa,
+            sikaStatusPemberi: record.sikaStatusPemberi,
+            jsaStatusPemberi: record.jsaStatusPemberi,
+            alasanTolakSikaPemberi: record.alasanTolakSikaPemberi,
+            alasanTolakJsaPemberi: record.alasanTolakJsaPemberi,
+            sikaStatusPJA: record.sikaStatusPJA,
+            jsaStatusPJA: record.jsaStatusPJA,
+            alasanTolakSikaPJA: record.alasanTolakSikaPJA,
+            alasanTolakJsaPJA: record.alasanTolakJsaPJA,
+          });
+        },
+
+        reset: () =>
+          set({
+            program: null,
+            jsa: null,
+            sika: null,
+            aktivitasList: [],
+            pendingRTL: null,
+            rtlList: [],
+            jsaStatus: 'draft',
+            sikaStatus: 'draft',
+            alasanTolakJSA: null,
+            alasanTolakSIKA: null,
+            approveDate: null,
+            savedWPs: [],
+            workPermitList: [],
+            filledSertifikat: [],
+            sikaStatusPemberi: 'draft',
+            jsaStatusPemberi: 'draft',
+            alasanTolakSikaPemberi: null,
+            alasanTolakJsaPemberi: null,
+            sikaStatusPJA: 'draft',
+            jsaStatusPJA: 'draft',
+            alasanTolakSikaPJA: null,
+            alasanTolakJsaPJA: null,
+            submissions: [],
+            activeSubmissionId: null,
+            approvalHistory: [],
+            sertifikatData: {},
+            gasMonitoringData: {},
+          }),
+      };
+    },
     { name: 'sika-program' }
   )
 );
@@ -787,6 +918,5 @@ export type {
   SertifikatData,
   GasMonitoringData,
   GasMonitoringRow,
-  PerpanjanganStatus,
-  RiwayatPerpanjangan,
+  SubmissionRecord,
 };
