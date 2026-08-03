@@ -1,13 +1,14 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState, useEffect } from 'react'; // tambahkan useEffect
+import { useState, useMemo } from 'react';
 import {
   ChevronLeft, ChevronRight, FileText, Search, Filter,
   CheckCircle, XCircle, Clock, AlertCircle, ClipboardCheck, Loader2,
 } from 'lucide-react';
-import { useProgramStore } from '@/store/programStore';
-import type { ApprovalStatus } from '@/store/programStore';
+import { useProgramStore, getNomorSika } from '@/store/programStore';
+import type { ApprovalStatus, PerubahanStatus } from '@/store/programStore';
+import { useAuthStore } from '@/store/authStore';
 
 /* ============================================================
    BOLD PERTAMINA GAS PALETTE
@@ -37,7 +38,12 @@ function StatusPill({ status }: { status: ApprovalStatus }) {
   );
 }
 
-const getOverallStatus = (sikaSt: ApprovalStatus, jsaSt: ApprovalStatus): ApprovalStatus => {
+// Status gabungan dari SUDUT PANDANG PEMBERI saja (SIKA + JSA yang mereka
+// putuskan sendiri). Sengaja dinamai beda dari getOverallStatus di
+// programStore.ts (yang menggabungkan Pemberi + PJA, dipakai di sisi
+// pemohon) supaya tidak tertukar — dua-duanya sama-sama valid, cuma beda
+// sudut pandang.
+const getPemberiStatus = (sikaSt: ApprovalStatus, jsaSt: ApprovalStatus): ApprovalStatus => {
   if (sikaSt === 'rejected' || jsaSt === 'rejected') return 'rejected';
   if (sikaSt === 'approved' && jsaSt === 'approved') return 'approved';
   if (sikaSt === 'approved' || jsaSt === 'approved') return 'waiting';
@@ -60,39 +66,50 @@ const OPSI_LOKASI = [
 
 /* ============================================================
    REVALIDASI MASUK
-   Pengajuan revalidasi harian yang dikirim pemohon dan perlu
-   ditinjau oleh Pemberi Kerja. Data disimpan lokal per baris
-   (demo) — begitu ada pengajuan yang statusnya sudah aktif,
-   revalidasi hari berjalan dianggap "masuk" dan menunggu review.
+   Pengajuan perubahan data (sertifikat/pekerja baru, dll) yang dikirim
+   pemohon lewat "Kirim Konfirmasi Revalidasi" di Detail Program, dan
+   perlu ditinjau Pemberi Kerja. Datanya diambil langsung dari
+   submission.perubahanStatus / catatanPerubahan di store — bukan state
+   lokal — supaya approve/reject di sini benar-benar tersimpan dan
+   terlihat balik di sisi pemohon.
 ============================================================ */
 
-type RevalidasiStatus = 'tidak_ada' | 'menunggu' | 'disetujui' | 'ditolak';
-
-interface RevalidasiMasuk {
-  rowId: string;
-  tanggal: string;
-  catatan: string;
-  status: RevalidasiStatus;
-}
-
-const REVALIDASI_BADGE: Record<RevalidasiStatus, { label: string; bg: string; icon: any } | null> = {
-  tidak_ada: null,
+const REVALIDASI_BADGE: Record<PerubahanStatus, { label: string; bg: string; icon: any } | null> = {
+  none:      null,
   menunggu:  { label: 'Menunggu Review', bg: '#F2A900', icon: Clock },
   disetujui: { label: 'Disetujui',       bg: '#00954E', icon: CheckCircle },
   ditolak:   { label: 'Ditolak',         bg: '#E31E24', icon: XCircle },
 };
 
+interface PemberiRow {
+  id: string;
+  namaProgram: string;
+  satKerja: string;
+  noJSA: string;
+  tanggalJSA: string;
+  noSIKA: string;
+  tanggalBerakhirSIKA: string;
+  lokasi: string;
+  pelaksana: string;
+  sikaStatus: ApprovalStatus;
+  jsaStatus: ApprovalStatus;
+  perubahanStatus: PerubahanStatus;
+  alasanTolakPerubahan: string | null;
+  catatanPerubahan: string | null;
+  updatedAt?: string;
+}
+
 function RevalidasiCell({
-  data,
+  row,
   onReview,
 }: {
-  data: RevalidasiMasuk | undefined;
+  row: PemberiRow;
   onReview: () => void;
 }) {
-  if (!data || data.status === 'tidak_ada') {
+  if (row.perubahanStatus === 'none') {
     return <span className="text-[10px] text-gray-300 italic">Belum ada</span>;
   }
-  const cfg = REVALIDASI_BADGE[data.status]!;
+  const cfg = REVALIDASI_BADGE[row.perubahanStatus]!;
   const Icon = cfg.icon;
   return (
     <div className="flex flex-col gap-1 items-start">
@@ -103,7 +120,7 @@ function RevalidasiCell({
         <Icon size={10} strokeWidth={3} className="shrink-0" />
         {cfg.label}
       </span>
-      {data.status === 'menunggu' && (
+      {row.perubahanStatus === 'menunggu' && (
         <button
           onClick={onReview}
           className="inline-flex items-center gap-1 text-[10px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg px-2.5 py-1 transition shadow-sm"
@@ -111,7 +128,7 @@ function RevalidasiCell({
           <ClipboardCheck size={11} /> Review
         </button>
       )}
-      {data.status !== 'menunggu' && (
+      {row.perubahanStatus !== 'menunggu' && (
         <button
           onClick={onReview}
           className="text-[10px] font-medium text-blue-600 hover:underline"
@@ -123,13 +140,28 @@ function RevalidasiCell({
   );
 }
 
+function StatusChip({ status }: { status: PerubahanStatus }) {
+  const cfg = REVALIDASI_BADGE[status];
+  if (!cfg) return null;
+  const Icon = cfg.icon;
+  return (
+    <span
+      className="inline-flex items-center h-5 leading-none gap-1 text-[10px] font-medium px-2.5 py-1 rounded-full whitespace-nowrap text-white shadow-sm"
+      style={{ background: cfg.bg }}
+    >
+      <Icon size={10} strokeWidth={3} className="shrink-0" />
+      {cfg.label}
+    </span>
+  );
+}
+
 function RevalidasiMasukModal({
-  data,
+  row,
   onClose,
   onSetujui,
   onTolak,
 }: {
-  data: RevalidasiMasuk;
+  row: PemberiRow;
   onClose: () => void;
   onSetujui: () => void;
   onTolak: (alasan: string) => void;
@@ -138,9 +170,11 @@ function RevalidasiMasukModal({
   const [alasan, setAlasan] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const tanggalLabel = new Date(data.tanggal).toLocaleDateString('id-ID', {
-    weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
-  });
+  const tanggalLabel = row.updatedAt
+    ? new Date(row.updatedAt).toLocaleDateString('id-ID', {
+        weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
+      })
+    : '-';
 
   const handleSetujui = () => {
     setLoading(true);
@@ -162,8 +196,10 @@ function RevalidasiMasukModal({
           style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}
         >
           <div className="leading-tight">
-            <p className="text-white font-bold text-sm">Review Revalidasi Harian</p>
-            <p className="text-[10px] text-white/70 font-medium">Pengajuan dari pemohon &middot; {tanggalLabel}</p>
+            <p className="text-white font-bold text-sm">Review Konfirmasi Revalidasi</p>
+            <p className="text-[10px] text-white/70 font-medium">
+              {row.namaProgram} &middot; {tanggalLabel}
+            </p>
           </div>
         </div>
 
@@ -171,9 +207,8 @@ function RevalidasiMasukModal({
           <div className="px-6 py-4 space-y-4">
 
             <div className="flex items-center gap-2">
-              {REVALIDASI_BADGE[data.status] && (
-                <StatusChip status={data.status} />
-              )}
+              <StatusChip status={row.perubahanStatus} />
+              <span className="text-xs font-semibold text-blue-600">{row.noSIKA}</span>
             </div>
 
             <div>
@@ -181,11 +216,22 @@ function RevalidasiMasukModal({
                 Catatan dari Pemohon
               </p>
               <div className="border border-gray-100 rounded-xl bg-gray-50/60 px-4 py-3 text-xs text-gray-700 leading-relaxed">
-                {data.catatan?.trim() ? data.catatan : (
+                {row.catatanPerubahan?.trim() ? row.catatanPerubahan : (
                   <span className="text-gray-400 italic">Tidak ada catatan tambahan.</span>
                 )}
               </div>
             </div>
+
+            {row.perubahanStatus === 'ditolak' && row.alasanTolakPerubahan && (
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-red-500 font-bold mb-1.5">
+                  Alasan Penolakan Sebelumnya
+                </p>
+                <div className="border border-red-100 rounded-xl bg-red-50/60 px-4 py-3 text-xs text-red-700 leading-relaxed">
+                  {row.alasanTolakPerubahan}
+                </div>
+              </div>
+            )}
 
             {mode === 'tolak' && (
               <div className="flex flex-col gap-1.5">
@@ -203,14 +249,16 @@ function RevalidasiMasukModal({
             )}
 
             <p className="text-[10px] text-gray-400 leading-relaxed">
-              Tinjau kondisi lapangan yang dilaporkan pemohon sebelum menyetujui revalidasi harian ini.
+              Tinjau perubahan data (sertifikat/pekerja baru, dll) yang diajukan pemohon lewat halaman
+              Detail Program sebelum menyetujui. Data lengkap SIKA &amp; JSA yang sudah diperbarui bisa
+              dilihat lewat tombol "Review" di baris pengajuan ini.
               Jika kondisi tidak sesuai, tolak dan sertakan alasannya agar pemohon dapat menindaklanjuti.
             </p>
           </div>
         </div>
 
         <div className="px-6 py-3.5 border-t border-gray-100 flex items-center justify-end gap-2 bg-gray-50/60 shrink-0">
-          {mode === 'lihat' && data.status === 'menunggu' && (
+          {mode === 'lihat' && row.perubahanStatus === 'menunggu' && (
             <>
               <button
                 onClick={onClose}
@@ -261,7 +309,7 @@ function RevalidasiMasukModal({
               </button>
             </>
           )}
-          {mode === 'lihat' && data.status !== 'menunggu' && (
+          {mode === 'lihat' && row.perubahanStatus !== 'menunggu' && (
             <button
               onClick={onClose}
               className="text-xs font-semibold text-gray-500 hover:text-gray-700 px-3.5 py-2 rounded-lg transition"
@@ -275,29 +323,16 @@ function RevalidasiMasukModal({
   );
 }
 
-function StatusChip({ status }: { status: RevalidasiStatus }) {
-  const cfg = REVALIDASI_BADGE[status];
-  if (!cfg) return null;
-  const Icon = cfg.icon;
-  return (
-    <span
-      className="inline-flex items-center h-5 leading-none gap-1 text-[10px] font-medium px-2.5 py-1 rounded-full whitespace-nowrap text-white shadow-sm"
-      style={{ background: cfg.bg }}
-    >
-      <Icon size={10} strokeWidth={3} className="shrink-0" />
-      {cfg.label}
-    </span>
-  );
-}
-
 /* ============================================================ */
 
 export default function PemberiDataManagementPage() {
   const router = useRouter();
   const {
-    program, jsa, sika,
-    sikaStatusPemberi, jsaStatusPemberi,
+    submissions,
+    approvePerubahanRevalidasi,
+    rejectPerubahanRevalidasi,
   } = useProgramStore();
+  const { user } = useAuthStore();
 
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -307,56 +342,41 @@ export default function PemberiDataManagementPage() {
   const [showFilter, setShowFilter] = useState(false);
   const [revalidasiModalRowId, setRevalidasiModalRowId] = useState<string | null>(null);
 
-  const hasSubmission = !!(program && jsa && sika && sikaStatusPemberi !== 'draft');
-  const overallAktif = hasSubmission && sikaStatusPemberi === 'approved' && jsaStatusPemberi === 'approved';
+  // Satu baris per submission yang sudah di-"Request Review" oleh pemohon
+  // (submitToPemberi di store) — bisa banyak baris, bukan cuma satu.
+  const rows: PemberiRow[] = useMemo(() => {
+    return submissions.map((sub): PemberiRow => {
+      const validBerlakuHingga = (sub.sika.berlakuHingga || []).filter(
+        (v: string) => !!v && !isNaN(new Date(v).getTime())
+      );
+      const tanggalBerakhirSIKA = validBerlakuHingga.length > 0
+        ? validBerlakuHingga.reduce((latest: string, cur: string) =>
+            new Date(cur) > new Date(latest) ? cur : latest
+          )
+        : '-';
 
-  // === PERBAIKAN: inisialisasi revalidasiMasuk via useEffect ===
-  const [revalidasiMasuk, setRevalidasiMasuk] = useState<Record<string, RevalidasiMasuk>>({});
-
-  useEffect(() => {
-    if (overallAktif) {
-      setRevalidasiMasuk((prev) => {
-        if (!prev['store-1']) {
-          return {
-            ...prev,
-            'store-1': {
-              rowId: 'store-1',
-              tanggal: new Date().toISOString(),
-              catatan: 'Kondisi area kerja masih aman, tidak ada perubahan identifikasi bahaya sejak SIKA diterbitkan.',
-              status: 'menunggu',
-            },
-          };
-        }
-        return prev;
-      });
-    }
-  }, [overallAktif]);
-
-  const validBerlakuHingga = ((sika as any)?.berlakuHingga || []).filter(
-    (v: string) => !!v && !isNaN(new Date(v).getTime())
-  );
-  const tanggalBerakhirSIKA = validBerlakuHingga.length > 0
-    ? validBerlakuHingga.reduce((latest: string, cur: string) =>
-        new Date(cur) > new Date(latest) ? cur : latest
-      )
-    : '-';
-
-  const rows = hasSubmission ? [{
-    id: 'store-1',
-    namaProgram: program!.namaPaket || '-',
-    satKerja: program!.satKerjaPemberi || '-',
-    noJSA: jsa!.jsaNo || '-',
-    tanggalJSA: jsa!.tanggalJSA || '-',
-    noSIKA: sika!.noSIKA || '-',
-    tanggalBerakhirSIKA,
-    lokasi: program!.lokasiKerja || '-',
-    pelaksana: program!.pelaksanaPerusahaan || '-',
-    sikaStatus: sikaStatusPemberi,
-    jsaStatus: jsaStatusPemberi,
-  }] : [];
+      return {
+        id: sub.id,
+        namaProgram: sub.program.namaPaket || '-',
+        satKerja: sub.program.satKerjaPemberi || '-',
+        noJSA: sub.jsa.jsaNo || '-',
+        tanggalJSA: sub.jsa.tanggalJSA || '-',
+        noSIKA: getNomorSika(sub.sika),
+        tanggalBerakhirSIKA,
+        lokasi: sub.program.lokasiKerja || '-',
+        pelaksana: sub.program.pelaksanaPerusahaan || '-',
+        sikaStatus: sub.sikaStatusPemberi,
+        jsaStatus: sub.jsaStatusPemberi,
+        perubahanStatus: sub.perubahanStatus,
+        alasanTolakPerubahan: sub.alasanTolakPerubahan,
+        catatanPerubahan: sub.catatanPerubahan,
+        updatedAt: sub.updatedAt,
+      };
+    });
+  }, [submissions]);
 
   const filtered = rows.filter((r) => {
-    const overall = getOverallStatus(r.sikaStatus, r.jsaStatus);
+    const overall = getPemberiStatus(r.sikaStatus, r.jsaStatus);
     const matchCari = !search ||
       r.namaProgram.toLowerCase().includes(search.toLowerCase()) ||
       r.noJSA.toLowerCase().includes(search.toLowerCase()) ||
@@ -380,30 +400,24 @@ export default function PemberiDataManagementPage() {
 
   const countByOverall = (target: ApprovalStatus | 'pending') =>
     rows.filter((r) => {
-      const overall = getOverallStatus(r.sikaStatus, r.jsaStatus);
+      const overall = getPemberiStatus(r.sikaStatus, r.jsaStatus);
       if (target === 'pending') return overall === 'request' || overall === 'waiting';
       return overall === target;
     }).length;
 
-  const countRevalidasiMenunggu = Object.values(revalidasiMasuk).filter(r => r.status === 'menunggu').length;
+  const countRevalidasiMenunggu = rows.filter((r) => r.perubahanStatus === 'menunggu').length;
 
-  const revalidasiModalData = revalidasiModalRowId ? revalidasiMasuk[revalidasiModalRowId] : undefined;
+  const revalidasiModalRow = revalidasiModalRowId ? rows.find((r) => r.id === revalidasiModalRowId) : undefined;
 
   const handleSetujuiRevalidasi = () => {
     if (!revalidasiModalRowId) return;
-    setRevalidasiMasuk((prev) => ({
-      ...prev,
-      [revalidasiModalRowId]: { ...prev[revalidasiModalRowId], status: 'disetujui' },
-    }));
+    approvePerubahanRevalidasi(user?.name || 'Pemberi Kerja', revalidasiModalRowId);
     setRevalidasiModalRowId(null);
   };
 
   const handleTolakRevalidasi = (alasan: string) => {
     if (!revalidasiModalRowId) return;
-    setRevalidasiMasuk((prev) => ({
-      ...prev,
-      [revalidasiModalRowId]: { ...prev[revalidasiModalRowId], status: 'ditolak', catatan: prev[revalidasiModalRowId].catatan },
-    }));
+    rejectPerubahanRevalidasi(user?.name || 'Pemberi Kerja', alasan, revalidasiModalRowId);
     setRevalidasiModalRowId(null);
   };
 
@@ -547,7 +561,7 @@ export default function PemberiDataManagementPage() {
             </div>
           )}
 
-          {!hasSubmission ? (
+          {rows.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3">
               <FileText size={40} className="text-gray-300" />
               <p className="text-gray-400 text-sm font-medium">Belum ada pengajuan masuk</p>
@@ -574,7 +588,7 @@ export default function PemberiDataManagementPage() {
                         </td>
                       </tr>
                     ) : filtered.map((row, i) => {
-                      const overall = getOverallStatus(row.sikaStatus, row.jsaStatus);
+                      const overall = getPemberiStatus(row.sikaStatus, row.jsaStatus);
                       return (
                         <tr key={row.id} className="border-b border-gray-100 hover:bg-blue-50/40 transition-colors">
                           <td className="px-4 py-3 text-xs text-gray-400 font-medium text-center">{i + 1}</td>
@@ -599,7 +613,7 @@ export default function PemberiDataManagementPage() {
                           <td className="px-4 py-3"><StatusPill status={overall} /></td>
                           <td className="px-4 py-3">
                             <RevalidasiCell
-                              data={revalidasiMasuk[row.id]}
+                              row={row}
                               onReview={() => setRevalidasiModalRowId(row.id)}
                             />
                           </td>
@@ -635,9 +649,9 @@ export default function PemberiDataManagementPage() {
         </div>
       </div>
 
-      {revalidasiModalData && (
+      {revalidasiModalRow && (
         <RevalidasiMasukModal
-          data={revalidasiModalData}
+          row={revalidasiModalRow}
           onClose={() => setRevalidasiModalRowId(null)}
           onSetujui={handleSetujuiRevalidasi}
           onTolak={handleTolakRevalidasi}

@@ -393,7 +393,7 @@ export default function SikaNewPage() {
 
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
-          <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
+          <img src="/logosika.svg" alt="SIKA" className="h-8 object-contain" style={{ marginTop: '3px' }} />
           <div className="w-px h-10 bg-gray-200" />
           <div className="flex flex-col leading-tight">
             <span className="text-sm font-bold text-gray-800">SIKA</span>
@@ -447,7 +447,7 @@ export default function SikaNewPage() {
             <p className="text-blue-200 text-xs mt-0.5">Isi seluruh kolom dengan lengkap dan benar</p>
           </div>
           <span className="text-xs bg-white/20 text-white px-3 py-1 rounded-full font-medium border border-white/30">
-            Surat Izin Kerja Aman
+            Surat Izin Kerja
           </span>
         </div>
 

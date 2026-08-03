@@ -166,11 +166,16 @@ type ApprovalStatus = 'draft' | 'request' | 'waiting' | 'approved' | 'rejected';
 
 interface ApprovalLogEntry {
   id: string;
-  dokumen: 'sika' | 'jsa';
+  dokumen: 'sika' | 'jsa' | 'perubahan';
   aksi: 'approve' | 'reject' | 'ajukan_ulang';
   oleh: string;
   peran: 'pemberi' | 'pja' | 'pemohon';
   alasan?: string;
+  // Submission mana yang terkait log ini. Opsional supaya entri lama (dari
+  // sebelum field ini ada) tidak error, tapi SEMUA log baru harus mengisi ini
+  // — tanpanya, begitu ada 2+ submission, riwayat approval antar pengajuan
+  // akan tercampur dan tidak bisa dibedakan.
+  submissionId?: string;
   timestamp: string;
 }
 
@@ -214,8 +219,12 @@ interface SubmissionRecord {
   // di atas: submission yang sedang berjalan tidak boleh kehilangan status
   // 'aktif'/'closed'-nya hanya karena sedang menunggu Pemberi meninjau
   // perubahan ini.
-  perubahanStatus: 'none' | 'menunggu' | 'disetujui' | 'ditolak';
+  perubahanStatus: PerubahanStatus;
   alasanTolakPerubahan: string | null;
+  // Catatan bebas dari pemohon yang menyertai pengajuan perubahan ini,
+  // ditampilkan ke Pemberi Kerja saat mereka me-review (lihat halaman
+  // Data Management Pemberi).
+  catatanPerubahan: string | null;
 
   createdAt: string;
   updatedAt: string;
@@ -281,6 +290,10 @@ export const getNomorSika = (
  */
 export type OverallStatus = 'aktif' | 'pending' | 'ditolak' | 'closed' | 'draft';
 
+// Status pengajuan perubahan data (revalidasi dengan update) — lihat
+// SubmissionRecord.perubahanStatus di bawah.
+export type PerubahanStatus = 'none' | 'menunggu' | 'disetujui' | 'ditolak';
+
 export const getOverallStatus = (
   sikaPemberi: ApprovalStatus,
   jsaPemberi: ApprovalStatus,
@@ -332,6 +345,11 @@ interface ProgramStore {
   sertifikatData: Record<string, SertifikatData>;
   gasMonitoringData: Record<string, GasMonitoringData>;
 
+  // --- Notifikasi (dibaca dari approvalHistory + submissions, lihat
+  // lib/notifications.ts). Yang disimpan di store cuma id yang SUDAH dibaca
+  // pemohon, supaya badge unread persist antar sesi tanpa perlu store baru.
+  readNotificationIds: string[];
+
   setProgram: (data: ProgramData) => void;
   setJSA: (data: JSAData) => void;
   setSika: (data: SikaData) => void;
@@ -379,7 +397,7 @@ interface ProgramStore {
   // dan akan reset status Pemberi ke 'request' sehingga submission tampak
   // "belum berlaku" lagi. Di sini hanya `perubahanStatus` yang berubah;
   // sikaStatusPemberi/jsaStatusPemberi tetap 'approved' sepanjang proses.
-  ajukanPerubahanRevalidasi: (oleh: string, id?: string) => void;
+  ajukanPerubahanRevalidasi: (oleh: string, catatan?: string, id?: string) => void;
   approvePerubahanRevalidasi: (oleh: string, id?: string) => void;
   rejectPerubahanRevalidasi: (oleh: string, alasan: string, id?: string) => void;
 
@@ -396,6 +414,10 @@ interface ProgramStore {
   // Dipanggil sebelum navigasi ke halaman Detail dari baris tabel manapun
   // di Data Management.
   openSubmission: (id: string) => void;
+
+  // Tandai satu / semua notifikasi sudah dibaca (lihat readNotificationIds).
+  markNotificationRead: (id: string) => void;
+  markAllNotificationsRead: (ids: string[]) => void;
 
   reset: () => void;
 }
@@ -437,7 +459,7 @@ export const useProgramStore = create<ProgramStore>()(
           // draft yang sedang aktif dibuka — supaya status program lain
           // yang kebetulan sedang tidak dibuka tidak ikut "berubah" di layar.
           ...(targetId === s.activeSubmissionId ? (patch as Partial<ProgramStore>) : {}),
-          approvalHistory: [...s.approvalHistory, makeLogEntry({ dokumen, aksi, oleh, peran, alasan })],
+          approvalHistory: [...s.approvalHistory, makeLogEntry({ dokumen, aksi, oleh, peran, alasan, submissionId: targetId })],
         }));
       };
 
@@ -473,6 +495,8 @@ export const useProgramStore = create<ProgramStore>()(
         approvalHistory: [],
         sertifikatData: {},
         gasMonitoringData: {},
+
+        readNotificationIds: [],
 
         // createdAt dipertahankan dari state sebelumnya kalau sudah ada (diisi
         // sekali saat program pertama kali dibuat), updatedAt selalu diperbarui.
@@ -646,6 +670,7 @@ export const useProgramStore = create<ProgramStore>()(
               riwayatRevalidasi: [],
               perubahanStatus: 'none',
               alasanTolakPerubahan: null,
+              catatanPerubahan: null,
               createdAt: now,
               updatedAt: now,
             };
@@ -659,8 +684,8 @@ export const useProgramStore = create<ProgramStore>()(
             jsaStatusPemberi: 'request',
             approvalHistory: [
               ...state.approvalHistory,
-              makeLogEntry({ dokumen: 'sika', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
-              makeLogEntry({ dokumen: 'jsa', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
+              makeLogEntry({ dokumen: 'sika', aksi: 'ajukan_ulang', oleh, peran: 'pemohon', submissionId: targetId }),
+              makeLogEntry({ dokumen: 'jsa', aksi: 'ajukan_ulang', oleh, peran: 'pemohon', submissionId: targetId }),
             ],
           });
         },
@@ -677,7 +702,7 @@ export const useProgramStore = create<ProgramStore>()(
               : {}),
             approvalHistory: [
               ...s.approvalHistory,
-              makeLogEntry({ dokumen: 'sika', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
+              makeLogEntry({ dokumen: 'sika', aksi: 'ajukan_ulang', oleh, peran: 'pemohon', submissionId: targetId ?? undefined }),
             ],
           }));
         },
@@ -694,7 +719,7 @@ export const useProgramStore = create<ProgramStore>()(
               : {}),
             approvalHistory: [
               ...s.approvalHistory,
-              makeLogEntry({ dokumen: 'jsa', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
+              makeLogEntry({ dokumen: 'jsa', aksi: 'ajukan_ulang', oleh, peran: 'pemohon', submissionId: targetId ?? undefined }),
             ],
           }));
         },
@@ -755,7 +780,7 @@ export const useProgramStore = create<ProgramStore>()(
               : { jsaStatusPJA: 'rejected', alasanTolakJsaPJA: alasan }
           ),
 
-        ajukanPerubahanRevalidasi: (oleh, id) => {
+        ajukanPerubahanRevalidasi: (oleh, catatan, id) => {
           const state = get();
           const targetId = id ?? state.activeSubmissionId;
           if (!targetId || !state.program || !state.sika || !state.jsa) return;
@@ -768,11 +793,12 @@ export const useProgramStore = create<ProgramStore>()(
             jsa: state.jsa,
             perubahanStatus: 'menunggu',
             alasanTolakPerubahan: null,
+            catatanPerubahan: catatan?.trim() || null,
           });
           set((s) => ({
             approvalHistory: [
               ...s.approvalHistory,
-              makeLogEntry({ dokumen: 'sika', aksi: 'ajukan_ulang', oleh, peran: 'pemohon' }),
+              makeLogEntry({ dokumen: 'perubahan', aksi: 'ajukan_ulang', oleh, peran: 'pemohon', submissionId: targetId }),
             ],
           }));
         },
@@ -788,7 +814,7 @@ export const useProgramStore = create<ProgramStore>()(
           set((s) => ({
             approvalHistory: [
               ...s.approvalHistory,
-              makeLogEntry({ dokumen: 'sika', aksi: 'approve', oleh, peran: 'pemberi' }),
+              makeLogEntry({ dokumen: 'perubahan', aksi: 'approve', oleh, peran: 'pemberi', submissionId: targetId }),
             ],
           }));
         },
@@ -804,7 +830,7 @@ export const useProgramStore = create<ProgramStore>()(
           set((s) => ({
             approvalHistory: [
               ...s.approvalHistory,
-              makeLogEntry({ dokumen: 'sika', aksi: 'reject', oleh, peran: 'pemberi', alasan }),
+              makeLogEntry({ dokumen: 'perubahan', aksi: 'reject', oleh, peran: 'pemberi', alasan, submissionId: targetId }),
             ],
           }));
         },
@@ -863,6 +889,18 @@ export const useProgramStore = create<ProgramStore>()(
           });
         },
 
+        markNotificationRead: (id) =>
+          set((state) =>
+            state.readNotificationIds.includes(id)
+              ? state
+              : { readNotificationIds: [...state.readNotificationIds, id] }
+          ),
+
+        markAllNotificationsRead: (ids) =>
+          set((state) => ({
+            readNotificationIds: [...new Set([...state.readNotificationIds, ...ids])],
+          })),
+
         reset: () =>
           set({
             program: null,
@@ -892,6 +930,7 @@ export const useProgramStore = create<ProgramStore>()(
             approvalHistory: [],
             sertifikatData: {},
             gasMonitoringData: {},
+            readNotificationIds: [],
           }),
       };
     },

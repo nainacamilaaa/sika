@@ -177,6 +177,27 @@ function BarTooltip({ active, payload, label }: any) {
 
 const MAX_HARI_REVALIDASI = 7;
 
+// Field `berlakuHingga` pada data SIKA BUKAN daftar tanggal — melainkan 6
+// karakter digit terpisah [D,D,M,M,Y,Y] hasil input kotak tanggal di form
+// (lihat komponen <DateBoxes/> di halaman review/detail). Sebelumnya kode
+// di sini keliru memperlakukan array 6-digit itu seolah tiap elemennya
+// adalah satu tanggal penuh lalu di-reduce untuk cari "yang paling akhir".
+// Akibatnya string satu-karakter seperti "0"/"1" di-parse oleh
+// `new Date()` secara longgar dan jatuh ke tahun ~1900-an, sehingga
+// selisih hari ke "hari ini" bisa jadi ribuan hari — itulah sumber angka
+// aneh seperti "Berakhir 9102 hari lalu" padahal SIKA-nya masih Aktif.
+// Fungsi ini menggabungkan 6 digit tsb jadi satu string tanggal ISO yang
+// valid dahulu, baru dipakai untuk perhitungan.
+function digitsToDateString(digits?: string[]): string {
+  if (!digits || digits.length !== 6 || digits.some((d) => !d)) return '-';
+  const [d1, d2, m1, m2, y1, y2] = digits;
+  const day = `${d1}${d2}`;
+  const month = `${m1}${m2}`;
+  const year = `20${y1}${y2}`; // asumsi tahun di abad 21 (20YY)
+  const iso = `${year}-${month}-${day}`;
+  return isNaN(new Date(iso).getTime()) ? '-' : iso;
+}
+
 function hitungSisaHari(tanggalBerakhir: string): number | null {
   if (!tanggalBerakhir || tanggalBerakhir === '-') return null;
   const berakhir = new Date(tanggalBerakhir);
@@ -641,17 +662,11 @@ export default function PemohonMonitoringPage() {
   // sengaja tidak muncul di sini.
   const rows: SIKARow[] = useMemo(() => {
     return submissions.map((sub): SIKARow => {
-      // Ambil tanggal BERLAKU HINGGA yang paling akhir/terjauh di antara semua
-      // isian valid, bukan sekadar entri terakhir dalam array — supaya tidak
-      // tergantung urutan array di store.
-      const validBerlakuHingga = (sub.sika.berlakuHingga || []).filter(
-        (v: string) => !!v && !isNaN(new Date(v).getTime())
-      );
-      const tanggalBerakhirSIKA = validBerlakuHingga.length > 0
-        ? validBerlakuHingga.reduce((latest: string, cur: string) =>
-            new Date(cur) > new Date(latest) ? cur : latest
-          )
-        : '-';
+      // FIX: `berlakuHingga` adalah array 6-digit [D,D,M,M,Y,Y], bukan
+      // daftar tanggal — jadi digabung dulu jadi satu tanggal ISO, bukan
+      // di-reduce seolah tiap elemen adalah tanggal terpisah (itu bug lama
+      // yang menyebabkan "Berakhir 9102 hari lalu").
+      const tanggalBerakhirSIKA = digitsToDateString(sub.sika.berlakuHingga);
 
       return {
         id: sub.id,
@@ -859,26 +874,29 @@ export default function PemohonMonitoringPage() {
   return (
     <div className="min-h-screen bg-gray-100">
 
-      {/* HEADER */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
-          <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
-          <div className="w-px h-10 bg-gray-200" />
-          <div className="flex flex-col leading-tight">
-            <span className="text-sm font-bold text-gray-800">Monitoring SIKA</span>
-            <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
-              Status &amp; Tracking Dokumen
-            </span>
-          </div>
+   {/* HEADER */}
+    <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+      <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
+        <img src="/logosika.svg" alt="SIKA" className="h-8 object-contain" style={{ marginTop: '3px' }} />
+        <div className="w-px h-10 bg-gray-200" />
+        <div className="flex flex-col leading-tight">
+          <span className="text-sm font-bold text-gray-800">Monitoring SIKA</span>
+          <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
+            Status &amp; Tracking Dokumen
+          </span>
         </div>
+      </div>
+
+      <div className="flex items-center gap-4" style={{ paddingRight: '38px' }}>
         <img
           src="/logopertaminagasfull.svg"
           alt="Pertamina Gas"
-          className="h-10 object-contain mr-6"
+          className="h-9 object-contain"
         />
       </div>
+    </div>
 
-      <div className="px-6 py-6 space-y-4">
+    <div className="px-6 py-6 space-y-4"> 
 
         {/* STATISTIK - SEJAJAR 5 KOLOM (BOLD PERTAMINA GAS) */}
         <div className="grid gap-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '0.75rem' }}>

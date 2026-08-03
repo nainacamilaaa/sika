@@ -2,8 +2,9 @@
 
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { ChevronLeft, CheckCircle, XCircle, Clock, FileText, History, Check } from 'lucide-react';
-import { useProgramStore } from '@/store/programStore';
+import { CheckCircle, XCircle, Clock, FileText, History, Check } from 'lucide-react';
+import { useProgramStore, getNomorSika } from '@/store/programStore';
+import type { ApprovalStatus, ApprovalLogEntry, PerubahanStatus } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
 
 /* =========================================================================
@@ -184,9 +185,36 @@ const getRiskBadgeStyle = (value: string) => {
   return { bg: '#f1f5f9', text: '#64748b' };
 };
 
+/* =========================================================================
+ * PROSES APPROVAL — gaya "dashboard" (kartu rounded-xl pastel, pill badge)
+ * seperti versi lama. Perubahan Data (Revalidasi) mengikuti bahasa visual
+ * yang sama supaya konsisten dengan kartu SIKA & JSA di sampingnya.
+ * ======================================================================= */
+
+const statusIcon = (status: string) => {
+  if (status === 'approved' || status === 'disetujui') return <CheckCircle size={16} className="text-green-500" />;
+  if (status === 'rejected' || status === 'ditolak') return <XCircle size={16} className="text-red-500" />;
+  return <Clock size={16} className="text-yellow-500" />;
+};
+
+const statusLabel: Record<string, string> = {
+  draft: 'Belum Direview',
+  request: 'Perlu Direview',
+  waiting: 'Menunggu',
+  approved: 'Disetujui',
+  rejected: 'Ditolak',
+  menunggu: 'Menunggu Review',
+  disetujui: 'Disetujui',
+  ditolak: 'Ditolak',
+};
+
 /* ========================================================================= */
 
-type ModalType = 'approve-sika' | 'reject-sika' | 'approve-jsa' | 'reject-jsa' | null;
+type ModalType =
+  | 'approve-sika' | 'reject-sika'
+  | 'approve-jsa' | 'reject-jsa'
+  | 'approve-perubahan' | 'reject-perubahan'
+  | null;
 
 export default function PemberiReviewPage() {
   const router = useRouter();
@@ -194,35 +222,46 @@ export default function PemberiReviewPage() {
   const id = params?.id as string;
   const { user } = useAuthStore();
   const {
-    program, jsa, sika,
-    sikaStatusPemberi, jsaStatusPemberi,
-    alasanTolakSikaPemberi, alasanTolakJsaPemberi,
+    submissions,
     approveSikaPemberi, rejectSikaPemberi,
     approveJsaPemberi, rejectJsaPemberi,
+    approvePerubahanRevalidasi, rejectPerubahanRevalidasi,
     approvalHistory,
   } = useProgramStore();
 
+  // Cari submission berdasarkan id dari URL — bukan lagi hardcoded 'store-1'.
+  // Setiap pengajuan yang sudah di-"Request Review" pemohon punya id sendiri
+  // di submissions[] (lihat programStore.ts), jadi halaman ini sekarang bisa
+  // dipakai untuk mereview pengajuan MANAPUN, bukan cuma satu.
+  const record = submissions.find((s) => s.id === id);
+
   useEffect(() => {
-    if (!program || !sika || !jsa) {
-      router.replace('/dashboard/pemberi/data-management');
-    } else if (id !== 'store-1') {
-      // Saat ini hanya satu pengajuan aktif yang tersimpan di store (id: 'store-1').
-      // Kalau nanti sudah pakai backend dengan banyak pengajuan, ganti logic ini
-      // untuk fetch data berdasarkan id dari URL.
+    if (!record) {
       router.replace('/dashboard/pemberi/data-management');
     }
-  }, [program, sika, jsa, id]);
+  }, [record, router]);
 
   const [modalType, setModalType] = useState<ModalType>(null);
   const [alasan, setAlasan] = useState('');
   const [alasanError, setAlasanError] = useState('');
   const [showHistory, setShowHistory] = useState(false);
 
+  if (!record) return null;
+
+  const { program, sika, jsa } = record;
+  const {
+    sikaStatusPemberi, jsaStatusPemberi,
+    alasanTolakSikaPemberi, alasanTolakJsaPemberi,
+    perubahanStatus, catatanPerubahan, alasanTolakPerubahan,
+  } = record;
+
   const sikaApproved = sikaStatusPemberi === 'approved';
   const sikaRejected = sikaStatusPemberi === 'rejected';
   const jsaApproved = jsaStatusPemberi === 'approved';
   const jsaRejected = jsaStatusPemberi === 'rejected';
   const jsaLocked = sikaStatusPemberi !== 'approved';
+
+  const noSikaGabungan = getNomorSika(sika);
 
   const openModal = (type: ModalType) => {
     setAlasan('');
@@ -232,34 +271,25 @@ export default function PemberiReviewPage() {
 
   const handleConfirm = () => {
     const namaUser = user?.name || 'Pemberi Kerja';
+    const isReject = modalType === 'reject-sika' || modalType === 'reject-jsa' || modalType === 'reject-perubahan';
 
-    if ((modalType === 'reject-sika' || modalType === 'reject-jsa') && !alasan.trim()) {
+    if (isReject && !alasan.trim()) {
       setAlasanError('Alasan penolakan wajib diisi.');
       return;
     }
-    if (modalType === 'approve-sika') approveSikaPemberi(namaUser);
-    if (modalType === 'reject-sika') rejectSikaPemberi(namaUser, alasan.trim());
-    if (modalType === 'approve-jsa') approveJsaPemberi(namaUser);
-    if (modalType === 'reject-jsa') rejectJsaPemberi(namaUser, alasan.trim());
+    if (modalType === 'approve-sika') approveSikaPemberi(namaUser, id);
+    if (modalType === 'reject-sika') rejectSikaPemberi(namaUser, alasan.trim(), id);
+    if (modalType === 'approve-jsa') approveJsaPemberi(namaUser, id);
+    if (modalType === 'reject-jsa') rejectJsaPemberi(namaUser, alasan.trim(), id);
+    if (modalType === 'approve-perubahan') approvePerubahanRevalidasi(namaUser, id);
+    if (modalType === 'reject-perubahan') rejectPerubahanRevalidasi(namaUser, alasan.trim(), id);
     setModalType(null);
   };
 
-  const statusIcon = (status: string) => {
-    if (status === 'approved') return <CheckCircle size={16} className="text-green-500" />;
-    if (status === 'rejected') return <XCircle size={16} className="text-red-500" />;
-    return <Clock size={16} className="text-yellow-500" />;
-  };
-
-  const statusLabel: Record<string, string> = {
-    draft: 'Belum Direview',
-    request: 'Perlu Direview',
-    waiting: 'Menunggu',
-    approved: 'Disetujui',
-    rejected: 'Ditolak',
-  };
-
+  // Riwayat khusus submission INI saja (dulu tidak difilter per-id sama
+  // sekali — begitu ada 2+ pengajuan, riwayatnya akan tercampur).
   const relevantHistory = approvalHistory
-    .filter((h) => h.peran === 'pemberi' || h.peran === 'pemohon')
+    .filter((h) => h.submissionId === id && (h.peran === 'pemberi' || h.peran === 'pemohon'))
     .slice()
     .reverse();
 
@@ -275,8 +305,6 @@ export default function PemberiReviewPage() {
   };
 
   const hasLangkahKerja = jsa?.sections?.some((sec) => sec.rows.some((r) => r.langkah.trim() !== ''));
-
-  if (!program || !sika || !jsa) return null;
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -574,16 +602,26 @@ export default function PemberiReviewPage() {
         </div>
       </div>
 
-      {/* ================= PROSES APPROVAL — fungsi khusus Pemberi Kerja (tidak diubah) ================= */}
+      {/* ================= PROSES APPROVAL — fungsi khusus Pemberi Kerja ================= */}
       <div className="px-4 sm:px-8 lg:px-14 xl:px-20 pb-8">
         <div
           className="mx-auto w-full bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden"
           style={{ maxWidth: '1680px' }}
         >
-          <div className="px-5 py-3 border-b border-gray-100"
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2"
             style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
-            <span className="text-white font-bold text-xs tracking-wide">PROSES APPROVAL</span>
-            <p className="text-blue-200 text-[10px] mt-0.5">SIKA harus disetujui terlebih dahulu sebelum JSA dapat diproses</p>
+            <div>
+              <span className="text-white font-bold text-xs tracking-wide">PROSES APPROVAL</span>
+              <p className="text-blue-200 text-[10px] mt-0.5">
+                Ref. No. SIKA: <span className="font-semibold">{noSikaGabungan}</span> &middot; SIKA harus disetujui terlebih dahulu sebelum JSA dapat diproses
+              </p>
+            </div>
+            <button
+              onClick={() => setShowHistory(true)}
+              className="flex items-center gap-1.5 rounded-full border border-white/40 text-white text-[10px] font-semibold px-3 py-1.5 hover:bg-white/10 transition"
+            >
+              <History size={12} /> Riwayat
+            </button>
           </div>
 
           <div className="px-6 py-5 grid grid-cols-2 gap-6">
@@ -725,11 +763,82 @@ export default function PemberiReviewPage() {
               )}
             </div>
           </div>
+
+          {/* ---- Persetujuan Perubahan Data (Revalidasi) — hanya tampil kalau ada pengajuan ---- */}
+          {perubahanStatus !== 'none' && (
+            <div className="px-6 pb-6">
+              <div className={`rounded-xl border-2 p-5 ${
+                perubahanStatus === 'disetujui' ? 'border-green-200 bg-green-50' :
+                perubahanStatus === 'ditolak' ? 'border-red-200 bg-red-50' :
+                'border-yellow-200 bg-yellow-50'
+              }`}>
+                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <FileText size={16} className="text-yellow-600" />
+                    <span className="text-sm font-bold text-gray-800">Perubahan Data (Revalidasi)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {statusIcon(perubahanStatus)}
+                    <span className={`text-xs font-semibold ${
+                      perubahanStatus === 'disetujui' ? 'text-green-600' :
+                      perubahanStatus === 'ditolak' ? 'text-red-600' : 'text-yellow-600'
+                    }`}>
+                      {statusLabel[perubahanStatus] ?? perubahanStatus}
+                    </span>
+                  </div>
+                </div>
+
+                <p className="text-xs text-gray-500 mb-3">
+                  Pemohon mengajukan perubahan data (sertifikat/pekerja baru, dll) pada SIKA yang sudah aktif.
+                </p>
+
+                <div className="mb-3">
+                  <p className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold mb-1">Catatan dari Pemohon</p>
+                  <div className="bg-white/70 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-700">
+                    {catatanPerubahan?.trim() ? catatanPerubahan : (
+                      <span className="text-gray-400 italic">Tidak ada catatan tambahan.</span>
+                    )}
+                  </div>
+                </div>
+
+                {perubahanStatus === 'ditolak' && alasanTolakPerubahan && (
+                  <div className="mb-3 bg-red-100 border border-red-200 rounded-lg px-3 py-2">
+                    <p className="text-xs text-red-600 font-medium mb-0.5">Alasan Penolakan:</p>
+                    <p className="text-xs text-red-700">{alasanTolakPerubahan}</p>
+                  </div>
+                )}
+
+                {perubahanStatus === 'disetujui' && (
+                  <div className="flex items-center gap-2 bg-green-100 border border-green-200 rounded-lg px-3 py-2">
+                    <CheckCircle size={13} className="text-green-500 shrink-0" />
+                    <p className="text-xs text-green-700">Perubahan telah disetujui. Data SIKA &amp; JSA di atas adalah versi terbaru.</p>
+                  </div>
+                )}
+
+                {perubahanStatus === 'menunggu' && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => openModal('approve-perubahan')}
+                      className="flex-1 flex items-center justify-center gap-1.5 bg-green-500 hover:bg-green-600 text-white text-xs font-semibold py-2 rounded-lg transition"
+                    >
+                      <CheckCircle size={13} /> Setujui Perubahan
+                    </button>
+                    <button
+                      onClick={() => openModal('reject-perubahan')}
+                      className="flex-1 flex items-center justify-center gap-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold py-2 rounded-lg transition"
+                    >
+                      <XCircle size={13} /> Tolak Perubahan
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       {modalType && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100"
               style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
@@ -738,6 +847,8 @@ export default function PemberiReviewPage() {
                 {modalType === 'reject-sika' && 'Penolakan SIKA'}
                 {modalType === 'approve-jsa' && 'Konfirmasi Persetujuan JSA'}
                 {modalType === 'reject-jsa' && 'Penolakan JSA'}
+                {modalType === 'approve-perubahan' && 'Konfirmasi Persetujuan Perubahan'}
+                {modalType === 'reject-perubahan' && 'Penolakan Perubahan'}
               </p>
               <p className="text-blue-200 text-xs mt-0.5">
                 {modalType?.startsWith('approve')
@@ -751,7 +862,11 @@ export default function PemberiReviewPage() {
                 <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3">
                   <CheckCircle size={18} className="text-green-500 shrink-0" />
                   <p className="text-sm text-green-700">
-                    Dengan menyetujui, dokumen {modalType === 'approve-sika' ? 'SIKA' : 'JSA'} akan diteruskan ke Penanggung Jawab Aset dan keputusan ini <strong>tidak dapat dibatalkan</strong>.
+                    {modalType === 'approve-perubahan' ? (
+                      <>Dengan menyetujui, perubahan data ini akan berlaku pada SIKA &amp; JSA aktif.</>
+                    ) : (
+                      <>Dengan menyetujui, dokumen {modalType === 'approve-sika' ? 'SIKA' : 'JSA'} akan diteruskan ke Penanggung Jawab Aset dan keputusan ini <strong>tidak dapat dibatalkan</strong>.</>
+                    )}
                   </p>
                 </div>
               ) : (
@@ -759,7 +874,9 @@ export default function PemberiReviewPage() {
                   <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
                     <XCircle size={18} className="text-red-500 shrink-0" />
                     <p className="text-sm text-red-700">
-                      Dokumen {modalType === 'reject-sika' ? 'SIKA' : 'JSA'} akan dikembalikan ke pemohon untuk direvisi.
+                      {modalType === 'reject-perubahan'
+                        ? 'Perubahan data ini akan dikembalikan ke pemohon untuk direvisi. SIKA & JSA yang sudah aktif tidak terpengaruh.'
+                        : `Dokumen ${modalType === 'reject-sika' ? 'SIKA' : 'JSA'} akan dikembalikan ke pemohon untuk direvisi.`}
                     </p>
                   </div>
                   <div>
@@ -804,13 +921,13 @@ export default function PemberiReviewPage() {
       )}
 
       {showHistory && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[80vh] flex flex-col">
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between"
               style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
               <div>
                 <p className="text-white font-bold text-sm">Riwayat Approval</p>
-                <p className="text-blue-200 text-xs mt-0.5">SIKA &amp; JSA — Pemberi Kerja</p>
+                <p className="text-blue-200 text-xs mt-0.5">SIKA, JSA &amp; Revalidasi &middot; Ref. {noSikaGabungan}</p>
               </div>
               <button
                 onClick={() => setShowHistory(false)}
@@ -827,7 +944,7 @@ export default function PemberiReviewPage() {
                   {relevantHistory.map((h) => {
                     const aksiLabel = h.aksi === 'approve' ? 'Menyetujui' : h.aksi === 'reject' ? 'Menolak' : 'Mengajukan ulang';
                     const aksiColor = h.aksi === 'approve' ? 'text-green-600' : h.aksi === 'reject' ? 'text-red-600' : 'text-blue-600';
-                    const dokumenLabel = h.dokumen === 'sika' ? 'SIKA' : 'JSA';
+                    const dokumenLabel = h.dokumen === 'sika' ? 'SIKA' : h.dokumen === 'jsa' ? 'JSA' : 'Perubahan Data';
                     return (
                       <div key={h.id} className="border border-gray-100 rounded-lg px-3 py-2.5 bg-gray-50">
                         <div className="flex items-center justify-between mb-1">

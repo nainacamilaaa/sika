@@ -237,7 +237,7 @@ export default function DetailJSAPage() {
     <div className="min-h-screen bg-gray-100">
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
-          <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
+          <img src="/logosika.svg" alt="SIKA" className="h-8 object-contain" style={{ marginTop: '3px' }} />
           <div className="w-px h-10 bg-gray-200" />
           <div className="flex flex-col leading-tight">
             <span className="text-sm font-bold text-gray-800">JSA</span>

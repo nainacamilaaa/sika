@@ -236,6 +236,7 @@ export default function DetailProgramPage() {
   const { user } = useAuthStore();
   const contentRef = useRef<HTMLDivElement>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [catatanRevalidasi, setCatatanRevalidasi] = useState('');
 
   useEffect(() => {
     if (!program) router.replace('/dashboard/pemohon/program/new');
@@ -291,8 +292,9 @@ export default function DetailProgramPage() {
       return;
     }
     if (!activeSubmissionId) return;
-    ajukanPerubahanRevalidasi(user?.name || 'Pemohon');
+    ajukanPerubahanRevalidasi(user?.name || 'Pemohon', catatanRevalidasi.trim() || undefined);
     catatRevalidasi(activeSubmissionId, new Date().toISOString().split('T')[0]);
+    setCatatanRevalidasi('');
     alert('Konfirmasi revalidasi & perubahan data berhasil dikirim ke Pemberi Kerja untuk direview.');
     router.push('/dashboard/pemohon/data-management');
   };
@@ -345,14 +347,14 @@ export default function DetailProgramPage() {
         {/* ================= HEADER (tidak diubah) ================= */}
         <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
-            <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
+            <img src="/logosika.svg" alt="SIKA" className="h-8 object-contain" style={{ marginTop: '3px' }} />
             <div className="w-px h-10 bg-gray-200" />
             <div className="flex flex-col leading-tight">
-              <span className="text-sm font-bold text-gray-800">Detail Program</span>
-              <span className="text-8 font-semibold text-blue-600 uppercase tracking-wider">
-                Surat Izin Kerja (SIKA) &amp; Job Safety Analysis (JSA)
-              </span>
-            </div>
+            <span className="text-sm font-bold text-gray-800">Detail Program</span>
+            <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
+              Surat Izin Kerja (SIKA) &amp; Job Safety Analysis (JSA)
+            </span>
+          </div>
           </div>
 
           <div className="flex items-center gap-3">
@@ -670,6 +672,24 @@ export default function DetailProgramPage() {
         </div>
 
       </div>
+
+      {/* Catatan opsional untuk Pemberi Kerja, khusus alur revalidasi-dengan-perubahan */}
+      {isRevalidasiUpdate && !perubahanMenunggu && (
+        <div className="px-6 pb-3 bg-gray-100 flex justify-end">
+          <div className="w-full max-w-md">
+            <label className="text-[11px] font-semibold text-gray-500 block mb-1">
+              Catatan untuk Pemberi Kerja (opsional)
+            </label>
+            <textarea
+              value={catatanRevalidasi}
+              onChange={(e) => setCatatanRevalidasi(e.target.value)}
+              rows={2}
+              placeholder="Jelaskan perubahan yang diajukan, mis. penambahan sertifikat/pekerja baru..."
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-300 resize-none bg-white"
+            />
+          </div>
+        </div>
+      )}
 
       {/* ================= ACTION BUTTONS (tidak diubah) ================= */}
       <div className="flex justify-end gap-2 pb-4 px-6 bg-gray-100">
