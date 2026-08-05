@@ -342,57 +342,57 @@ export default function DetailProgramPage() {
 
   return (
     <div className="min-h-screen bg-gray-100">
-      <div ref={contentRef} className="bg-gray-100">
 
-        {/* ================= HEADER (tidak diubah) ================= */}
-        <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
-            <img src="/logosika.svg" alt="SIKA" className="h-8 object-contain" style={{ marginTop: '3px' }} />
-            <div className="w-px h-10 bg-gray-200" />
-            <div className="flex flex-col leading-tight">
-            <span className="text-sm font-bold text-gray-800">Detail Program</span>
-            <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
-              Surat Izin Kerja (SIKA) &amp; Job Safety Analysis (JSA)
-            </span>
-          </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-0">
-              {[
-                { label: 'Program', active: false },
-                { label: 'Pengisian SIKA', active: false },
-                { label: 'Pengisian JSA', active: false },
-                { label: 'Detail Program', active: true },
-              ].map((step, i, arr) => (
-                <div key={step.label} className="flex items-center">
-                  <div className="flex items-center gap-2 px-2">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                      step.active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'
-                    }`}>
-                      {i + 1}
-                    </div>
-                    <span className={`text-xs font-medium ${step.active ? 'text-blue-600' : 'text-gray-400'}`}>
-                      {step.label}
-                    </span>
-                  </div>
-                  {i < arr.length - 1 && <div className="w-6 h-px bg-gray-200" />}
-                </div>
-              ))}
-            </div>
-
-            <div className="w-px h-8 bg-gray-200" />
-
-            <div className="flex items-center gap-2" style={{ paddingRight: '1px' }}>
-              <img
-                src="/logopertaminagasfull.svg"
-                alt="Pertamina Gas"
-                className="h-8 object-contain"
-              />
-            </div>
-          </div>
+      {/* ================= HEADER (tidak diubah) ================= */}
+      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
+          <img src="/logosika.svg" alt="SIKA" className="h-8 object-contain" style={{ marginTop: '3px' }} />
+          <div className="w-px h-10 bg-gray-200" />
+          <div className="flex flex-col leading-tight">
+          <span className="text-sm font-bold text-gray-800">Detail Program</span>
+          <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
+            Surat Izin Kerja (SIKA) &amp; Job Safety Analysis (JSA)
+          </span>
+        </div>
         </div>
 
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-0">
+            {[
+              { label: 'Program', active: false },
+              { label: 'Pengisian SIKA', active: false },
+              { label: 'Pengisian JSA', active: false },
+              { label: 'Detail Program', active: true },
+            ].map((step, i, arr) => (
+              <div key={step.label} className="flex items-center">
+                <div className="flex items-center gap-2 px-2">
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                    step.active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'
+                  }`}>
+                    {i + 1}
+                  </div>
+                  <span className={`text-xs font-medium ${step.active ? 'text-blue-600' : 'text-gray-400'}`}>
+                    {step.label}
+                  </span>
+                </div>
+                {i < arr.length - 1 && <div className="w-6 h-px bg-gray-200" />}
+              </div>
+            ))}
+          </div>
+
+          <div className="w-px h-8 bg-gray-200" />
+
+          <div className="flex items-center gap-2" style={{ paddingRight: '1px' }}>
+            <img
+              src="/logopertaminagasfull.svg"
+              alt="Pertamina Gas"
+              className="h-8 object-contain"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div ref={contentRef} className="bg-gray-100">
         {/* ================= DOCUMENT BODY (didesain ulang seperti form cetak) ================= */}
         <div className="px-4 sm:px-8 lg:px-14 xl:px-20 py-8">
           <div

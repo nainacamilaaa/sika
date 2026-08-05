@@ -7,7 +7,7 @@ import {
   CheckCircle, XCircle, Clock, AlertCircle, ChevronRight, Filter,
   CalendarDays, Calendar, ChevronDown,
   TrendingUp, TrendingDown, Activity, ClipboardCheck,
-  Loader2
+  Loader2, RefreshCcw
 } from 'lucide-react';
 import { useProgramStore, getNomorSika, getOverallStatus } from '@/store/programStore';
 import type { ApprovalStatus, OverallStatus } from '@/store/programStore';
@@ -44,9 +44,11 @@ interface SIKARow {
   riwayatRevalidasi: string[];
   // Status perubahan data (sertifikat/pekerja baru dll) yang diajukan lewat
   // "Kirim Konfirmasi Revalidasi" di Detail Program — terpisah dari status
-  // approval utama, lihat programStore.ts.
-  perubahanStatus: 'none' | 'menunggu' | 'disetujui' | 'ditolak';
-  alasanTolakPerubahan?: string | null;
+  // approval utama, lihat programStore.ts. 'revisi' (bukan 'ditolak'):
+  // perubahan dikembalikan untuk dilengkapi, bukan ditutup permanen — SIKA
+  // & JSA yang sudah aktif tidak terpengaruh.
+  perubahanStatus: 'none' | 'menunggu' | 'disetujui' | 'revisi';
+  catatanRevisiPerubahan?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -69,6 +71,19 @@ const STATUS_CONFIG: Record<OverallStatus, { label: string; bg: string; icon: an
   draft:   { label: 'Draft',   bg: '#8A94A6', icon: AlertCircle },
 };
 
+// Status tampilan tambahan khusus untuk baris yang pengajuan
+// perubahan/revalidasinya diminta direvisi oleh Pemberi Kerja
+// (submission.perubahanStatus === 'revisi'). Ini TIDAK menggantikan
+// OverallStatus di store — cuma override tampilan badge di tabel ini
+// supaya pemohon langsung sadar ada revalidasi yang perlu dilengkapi,
+// sekalipun status SIKA/JSA utamanya sendiri masih 'aktif'.
+type DisplayStatus = OverallStatus | 'revisi';
+
+const DISPLAY_STATUS_CONFIG: Record<DisplayStatus, { label: string; bg: string; icon: any }> = {
+  ...STATUS_CONFIG,
+  revisi: { label: 'Perlu Revisi', bg: '#E31E24', icon: RefreshCcw },
+};
+
 const APPROVAL_BADGE: Record<ApprovalStatus, { label: string; bg: string }> = {
   draft:    { label: 'Draft',     bg: '#8A94A6' },
   request:  { label: 'Review',    bg: '#0E76BC' },
@@ -89,8 +104,8 @@ function ApprovalBadge({ status }: { status: ApprovalStatus }) {
   );
 }
 
-function StatusBadge({ status }: { status: OverallStatus }) {
-  const cfg = STATUS_CONFIG[status];
+function StatusBadge({ status }: { status: DisplayStatus }) {
+  const cfg = DISPLAY_STATUS_CONFIG[status];
   const Icon = cfg.icon;
   return (
     <span
@@ -316,11 +331,13 @@ function RevalidasiCell({
   baseStatus,
   validatedDates,
   onAjukan,
+  onRevisiPerubahan,
 }: {
   row: SIKARow;
   baseStatus: OverallStatus;
   validatedDates: string[];
   onAjukan: (rowId: string) => void;
+  onRevisiPerubahan: (rowId: string) => void;
 }) {
   if (baseStatus !== 'aktif' && baseStatus !== 'closed') {
     return <span className="text-[10px] text-gray-300 italic">Belum berlaku</span>;
@@ -338,6 +355,7 @@ function RevalidasiCell({
   const hariIni = days.find(d => d.dayNumber === hariKeDitampilkan);
   const sudahValidasiHariIni = hariIni?.status === 'validated';
   const perubahanMenunggu = row.perubahanStatus === 'menunggu';
+  const perubahanPerluRevisi = row.perubahanStatus === 'revisi';
 
   const perluAksi = baseStatus === 'aktif' && !sudahLewatBatas && !sudahValidasiHariIni && !perubahanMenunggu;
 
@@ -369,7 +387,27 @@ function RevalidasiCell({
   ))}
 </div>
 
-      {perluAksi && (
+      {/* Perubahan/revalidasi yang diajukan pemohon diminta direvisi Pemberi
+          Kerja — beri jalan keluar yang jelas, bukan cuma teks statis, supaya
+          pemohon langsung tahu langkah selanjutnya. */}
+      {perubahanPerluRevisi && (
+        <div className="flex flex-col gap-1">
+          <p className="text-[10px] font-medium leading-snug" style={{ color: '#E31E24' }}>
+            Pemberi Kerja meminta revisi atas perubahan yang diajukan.
+          </p>
+          <button
+            onClick={() => onRevisiPerubahan(row.id)}
+            className="inline-flex items-center justify-center gap-1 text-[10px] font-semibold text-white rounded-lg px-2.5 py-1.5 transition shadow-sm w-fit"
+            style={{ background: '#E31E24' }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = '#c81a1f'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = '#E31E24'; }}
+          >
+            <RefreshCcw size={11} /> Ajukan Ulang Perubahan
+          </button>
+        </div>
+      )}
+
+      {!perubahanPerluRevisi && perluAksi && (
         <button
           onClick={() => onAjukan(row.id)}
           className="inline-flex items-center justify-center gap-1 text-[10px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg px-2.5 py-1.5 transition shadow-sm w-fit"
@@ -384,7 +422,7 @@ function RevalidasiCell({
         </p>
       )}
 
-      {!perubahanMenunggu && sudahValidasiHariIni && !sudahLewatBatas && (
+      {!perubahanMenunggu && !perubahanPerluRevisi && sudahValidasiHariIni && !sudahLewatBatas && (
         <p className="text-[10px] text-gray-400 leading-snug">
           Validasi berikutnya dibuka besok.
         </p>
@@ -557,10 +595,10 @@ function RevalidasiModal({
       className="sr-only"
     />
     <div className="flex-1 min-w-0 space-y-1.5">
-      <span className="font-semibold text-gray-700 leading-relaxed block break-words">
+      <span className="font-semibold text-gray-700 leading-relaxed block wrap-break-word">
         Perlu menambah sertifikat, pekerja baru, atau perubahan lain?
       </span>
-      <p className="text-[10px] font-normal text-gray-500 leading-relaxed break-words">
+      <p className="text-[10px] font-normal text-gray-500 leading-relaxed wrap-break-word">
         Kamu akan diarahkan ke form pengajuan SIKA baru untuk melengkapi perubahan ini,
         dari pengisian data sampai persetujuan selesai.
       </p>
@@ -689,7 +727,7 @@ export default function PemohonMonitoringPage() {
         identifikasiBahaya: sub.sika.identifikasi || [],
         riwayatRevalidasi: sub.riwayatRevalidasi,
         perubahanStatus: sub.perubahanStatus,
-        alasanTolakPerubahan: sub.alasanTolakPerubahan,
+        catatanRevisiPerubahan: sub.catatanRevisiPerubahan,
         createdAt: sub.createdAt,
         updatedAt: sub.updatedAt,
       };
@@ -698,6 +736,14 @@ export default function PemohonMonitoringPage() {
 
   const getFinalStatus = (row: SIKARow): OverallStatus =>
     getOverallStatus(row.sikaStatusPemberi, row.jsaStatusPemberi, row.sikaStatusPJA, row.jsaStatusPJA);
+
+  // Override tampilan badge jadi "Perlu Revisi" kalau Pemberi Kerja minta
+  // revisi atas pengajuan perubahan (revalidasi) — status ini terpisah dari
+  // getFinalStatus (yang menghitung status approval SIKA/JSA utama), tapi
+  // perlu tampil di badge biar pemohon langsung sadar ada yang perlu
+  // dilengkapi, walau SIKA/JSA yang sudah aktif tidak ikut berubah.
+  const getDisplayStatus = (row: SIKARow): DisplayStatus =>
+    row.perubahanStatus === 'revisi' ? 'revisi' : getFinalStatus(row);
 
   const timeFilteredRows = useMemo(() => {
     return filterByTime(rows, timeFilter, customRange);
@@ -861,6 +907,15 @@ export default function PemohonMonitoringPage() {
     // menampilkan data pengajuan ini.
     openSubmission(rowId);
     router.push('/dashboard/pemohon/jsa/detail');
+  };
+
+  // Pemberi Kerja meminta revisi atas pengajuan perubahan (revalidasi) —
+  // muat data submission ini ke draft aktif supaya pemohon bisa langsung
+  // melengkapi/memperbaiki data yang diminta, lalu mengirim ulang lewat
+  // "Kirim Konfirmasi Revalidasi" di Detail Program setelah selesai.
+  const handleAjukanUlangPerubahan = (rowId: string) => {
+    openSubmission(rowId);
+    router.push('/dashboard/pemohon/program/new');
   };
 
   const timeFilterLabels = {
@@ -1318,6 +1373,7 @@ export default function PemohonMonitoringPage() {
                   {filtered.map((row, i) => {
                     const baseStatus = getOverallStatus(row.sikaStatusPemberi, row.jsaStatusPemberi, row.sikaStatusPJA, row.jsaStatusPJA);
                     const overall = getFinalStatus(row);
+                    const displayStatus = getDisplayStatus(row);
                     const hasTolak = row.alasanTolakSika || row.alasanTolakJsa;
                     const sisaHari = hitungSisaHari(row.tanggalBerakhirSIKA);
                     const sertifikatIsi = row.sertifikatList
@@ -1387,11 +1443,12 @@ export default function PemohonMonitoringPage() {
                             baseStatus={baseStatus}
                             validatedDates={row.riwayatRevalidasi}
                             onAjukan={(rowId) => setRevalidasiModalRowId(rowId)}
+                            onRevisiPerubahan={handleAjukanUlangPerubahan}
                           />
                         </td>
                         <td className="px-3 py-3 align-top">
                           <div className="space-y-1">
-                            <StatusBadge status={overall} />
+                            <StatusBadge status={displayStatus} />
                             {hasTolak && (
                               <div className="text-[10px] text-red-500 leading-tight max-w-28">
                                 {row.alasanTolakSika || row.alasanTolakJsa}
@@ -1402,9 +1459,9 @@ export default function PemohonMonitoringPage() {
                                 Perubahan menunggu approval Pemberi
                               </div>
                             )}
-                            {row.perubahanStatus === 'ditolak' && (
-                              <div className="text-[10px] text-red-500 leading-tight max-w-28">
-                                Perubahan ditolak{row.alasanTolakPerubahan ? `: ${row.alasanTolakPerubahan}` : ''}
+                            {row.perubahanStatus === 'revisi' && (
+                              <div className="text-[10px] leading-tight max-w-28" style={{ color: '#E31E24' }}>
+                                Perubahan perlu direvisi{row.catatanRevisiPerubahan ? `: ${row.catatanRevisiPerubahan}` : ''}
                               </div>
                             )}
                             {sisaHari !== null && sisaHari <= 7 && (baseStatus === 'aktif' || baseStatus === 'closed') && (

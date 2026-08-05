@@ -193,7 +193,7 @@ const getRiskBadgeStyle = (value: string) => {
 
 const statusIcon = (status: string) => {
   if (status === 'approved' || status === 'disetujui') return <CheckCircle size={16} className="text-green-500" />;
-  if (status === 'rejected' || status === 'ditolak') return <XCircle size={16} className="text-red-500" />;
+  if (status === 'rejected') return <XCircle size={16} className="text-red-500" />;
   return <Clock size={16} className="text-yellow-500" />;
 };
 
@@ -205,7 +205,9 @@ const statusLabel: Record<string, string> = {
   rejected: 'Ditolak',
   menunggu: 'Menunggu Review',
   disetujui: 'Disetujui',
-  ditolak: 'Ditolak',
+  // Bukan "Ditolak" — perubahan dikembalikan ke pemohon untuk dilengkapi
+  // lagi, bukan ditutup permanen. Lihat programStore.ts: PerubahanStatus.
+  revisi: 'Perlu Revisi',
 };
 
 /* ========================================================================= */
@@ -225,7 +227,7 @@ export default function PemberiReviewPage() {
     submissions,
     approveSikaPemberi, rejectSikaPemberi,
     approveJsaPemberi, rejectJsaPemberi,
-    approvePerubahanRevalidasi, rejectPerubahanRevalidasi,
+    approvePerubahanRevalidasi, mintaRevisiPerubahan,
     approvalHistory,
   } = useProgramStore();
 
@@ -252,7 +254,7 @@ export default function PemberiReviewPage() {
   const {
     sikaStatusPemberi, jsaStatusPemberi,
     alasanTolakSikaPemberi, alasanTolakJsaPemberi,
-    perubahanStatus, catatanPerubahan, alasanTolakPerubahan,
+    perubahanStatus, catatanPerubahan, catatanRevisiPerubahan,
   } = record;
 
   const sikaApproved = sikaStatusPemberi === 'approved';
@@ -282,7 +284,7 @@ export default function PemberiReviewPage() {
     if (modalType === 'approve-jsa') approveJsaPemberi(namaUser, id);
     if (modalType === 'reject-jsa') rejectJsaPemberi(namaUser, alasan.trim(), id);
     if (modalType === 'approve-perubahan') approvePerubahanRevalidasi(namaUser, id);
-    if (modalType === 'reject-perubahan') rejectPerubahanRevalidasi(namaUser, alasan.trim(), id);
+    if (modalType === 'reject-perubahan') mintaRevisiPerubahan(namaUser, alasan.trim(), id);
     setModalType(null);
   };
 
@@ -769,7 +771,7 @@ export default function PemberiReviewPage() {
             <div className="px-6 pb-6">
               <div className={`rounded-xl border-2 p-5 ${
                 perubahanStatus === 'disetujui' ? 'border-green-200 bg-green-50' :
-                perubahanStatus === 'ditolak' ? 'border-red-200 bg-red-50' :
+                perubahanStatus === 'revisi' ? 'border-red-200 bg-red-50' :
                 'border-yellow-200 bg-yellow-50'
               }`}>
                 <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -781,7 +783,7 @@ export default function PemberiReviewPage() {
                     {statusIcon(perubahanStatus)}
                     <span className={`text-xs font-semibold ${
                       perubahanStatus === 'disetujui' ? 'text-green-600' :
-                      perubahanStatus === 'ditolak' ? 'text-red-600' : 'text-yellow-600'
+                      perubahanStatus === 'revisi' ? 'text-red-600' : 'text-yellow-600'
                     }`}>
                       {statusLabel[perubahanStatus] ?? perubahanStatus}
                     </span>
@@ -801,10 +803,10 @@ export default function PemberiReviewPage() {
                   </div>
                 </div>
 
-                {perubahanStatus === 'ditolak' && alasanTolakPerubahan && (
+                {perubahanStatus === 'revisi' && catatanRevisiPerubahan && (
                   <div className="mb-3 bg-red-100 border border-red-200 rounded-lg px-3 py-2">
-                    <p className="text-xs text-red-600 font-medium mb-0.5">Alasan Penolakan:</p>
-                    <p className="text-xs text-red-700">{alasanTolakPerubahan}</p>
+                    <p className="text-xs text-red-600 font-medium mb-0.5">Catatan Revisi:</p>
+                    <p className="text-xs text-red-700">{catatanRevisiPerubahan}</p>
                   </div>
                 )}
 
@@ -827,7 +829,7 @@ export default function PemberiReviewPage() {
                       onClick={() => openModal('reject-perubahan')}
                       className="flex-1 flex items-center justify-center gap-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold py-2 rounded-lg transition"
                     >
-                      <XCircle size={13} /> Tolak Perubahan
+                      <XCircle size={13} /> Minta Revisi
                     </button>
                   </div>
                 )}
@@ -848,7 +850,7 @@ export default function PemberiReviewPage() {
                 {modalType === 'approve-jsa' && 'Konfirmasi Persetujuan JSA'}
                 {modalType === 'reject-jsa' && 'Penolakan JSA'}
                 {modalType === 'approve-perubahan' && 'Konfirmasi Persetujuan Perubahan'}
-                {modalType === 'reject-perubahan' && 'Penolakan Perubahan'}
+                {modalType === 'reject-perubahan' && 'Permintaan Revisi Perubahan'}
               </p>
               <p className="text-blue-200 text-xs mt-0.5">
                 {modalType?.startsWith('approve')
@@ -881,13 +883,17 @@ export default function PemberiReviewPage() {
                   </div>
                   <div>
                     <label className="text-xs text-gray-700 font-medium block mb-1.5">
-                      Alasan Penolakan <span className="text-red-500">*</span>
+                      {modalType === 'reject-perubahan' ? 'Catatan Revisi' : 'Alasan Penolakan'} <span className="text-red-500">*</span>
                     </label>
                     <textarea
                       rows={4}
                       value={alasan}
                       onChange={(e) => { setAlasan(e.target.value); setAlasanError(''); }}
-                      placeholder="Tuliskan alasan penolakan secara jelas dan detail..."
+                      placeholder={
+                        modalType === 'reject-perubahan'
+                          ? 'Jelaskan apa yang perlu dilengkapi/diperbaiki pemohon...'
+                          : 'Tuliskan alasan penolakan secara jelas dan detail...'
+                      }
                       className={`w-full border rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-1 resize-none ${
                         alasanError ? 'border-red-400 focus:ring-red-400' : 'border-gray-300 focus:ring-blue-400'
                       }`}
@@ -913,7 +919,7 @@ export default function PemberiReviewPage() {
                     : 'bg-red-500 hover:bg-red-600'
                 }`}
               >
-                {modalType?.startsWith('approve') ? 'Ya, Setujui' : 'Ya, Tolak'}
+                {modalType?.startsWith('approve') ? 'Ya, Setujui' : modalType === 'reject-perubahan' ? 'Kirim Catatan Revisi' : 'Ya, Tolak'}
               </button>
             </div>
           </div>

@@ -220,7 +220,12 @@ interface SubmissionRecord {
   // 'aktif'/'closed'-nya hanya karena sedang menunggu Pemberi meninjau
   // perubahan ini.
   perubahanStatus: PerubahanStatus;
-  alasanTolakPerubahan: string | null;
+  // Catatan dari Pemberi Kerja saat meminta pemohon melengkapi/memperbaiki
+  // pengajuan perubahan (perubahanStatus === 'revisi'). BUKAN penolakan
+  // permanen — pemohon masih bisa mengajukan ulang lewat "Kirim Konfirmasi
+  // Revalidasi" di Detail Program. Ditampilkan ke pemohon sebagai
+  // "Catatan Revisi Sebelumnya".
+  catatanRevisiPerubahan: string | null;
   // Catatan bebas dari pemohon yang menyertai pengajuan perubahan ini,
   // ditampilkan ke Pemberi Kerja saat mereka me-review (lihat halaman
   // Data Management Pemberi).
@@ -291,8 +296,10 @@ export const getNomorSika = (
 export type OverallStatus = 'aktif' | 'pending' | 'ditolak' | 'closed' | 'draft';
 
 // Status pengajuan perubahan data (revalidasi dengan update) — lihat
-// SubmissionRecord.perubahanStatus di bawah.
-export type PerubahanStatus = 'none' | 'menunggu' | 'disetujui' | 'ditolak';
+// SubmissionRecord.perubahanStatus di bawah. 'revisi' (bukan 'ditolak'):
+// perubahan dikembalikan ke pemohon untuk dilengkapi lagi, bukan ditutup
+// permanen — SIKA & JSA yang sudah aktif tidak terpengaruh selama proses ini.
+export type PerubahanStatus = 'none' | 'menunggu' | 'disetujui' | 'revisi';
 
 export const getOverallStatus = (
   sikaPemberi: ApprovalStatus,
@@ -399,7 +406,11 @@ interface ProgramStore {
   // sikaStatusPemberi/jsaStatusPemberi tetap 'approved' sepanjang proses.
   ajukanPerubahanRevalidasi: (oleh: string, catatan?: string, id?: string) => void;
   approvePerubahanRevalidasi: (oleh: string, id?: string) => void;
-  rejectPerubahanRevalidasi: (oleh: string, alasan: string, id?: string) => void;
+  // Pemberi Kerja meminta pemohon melengkapi/memperbaiki pengajuan
+  // perubahan (perubahanStatus → 'revisi'). BUKAN penolakan permanen —
+  // SIKA & JSA yang sudah aktif tidak ikut berubah. Dipakai di
+  // Approval Management → RevalidasiMasukModal ("Minta Revisi").
+  mintaRevisiPerubahan: (oleh: string, catatan: string, id?: string) => void;
 
   // Catat revalidasi harian untuk submission tertentu (idempotent per tanggal)
   catatRevalidasi: (id: string, tanggalKey: string) => void;
@@ -669,7 +680,7 @@ export const useProgramStore = create<ProgramStore>()(
               alasanTolakJsaPJA: null,
               riwayatRevalidasi: [],
               perubahanStatus: 'none',
-              alasanTolakPerubahan: null,
+              catatanRevisiPerubahan: null,
               catatanPerubahan: null,
               createdAt: now,
               updatedAt: now,
@@ -792,7 +803,7 @@ export const useProgramStore = create<ProgramStore>()(
             sika: state.sika,
             jsa: state.jsa,
             perubahanStatus: 'menunggu',
-            alasanTolakPerubahan: null,
+            catatanRevisiPerubahan: null,
             catatanPerubahan: catatan?.trim() || null,
           });
           set((s) => ({
@@ -810,7 +821,7 @@ export const useProgramStore = create<ProgramStore>()(
           const record = state.submissions.find((s) => s.id === targetId);
           if (!record || record.perubahanStatus !== 'menunggu') return;
 
-          patchSubmission(targetId, { perubahanStatus: 'disetujui', alasanTolakPerubahan: null });
+          patchSubmission(targetId, { perubahanStatus: 'disetujui', catatanRevisiPerubahan: null });
           set((s) => ({
             approvalHistory: [
               ...s.approvalHistory,
@@ -819,18 +830,18 @@ export const useProgramStore = create<ProgramStore>()(
           }));
         },
 
-        rejectPerubahanRevalidasi: (oleh, alasan, id) => {
+        mintaRevisiPerubahan: (oleh, catatan, id) => {
           const state = get();
           const targetId = id ?? state.activeSubmissionId;
           if (!targetId) return;
           const record = state.submissions.find((s) => s.id === targetId);
           if (!record || record.perubahanStatus !== 'menunggu') return;
 
-          patchSubmission(targetId, { perubahanStatus: 'ditolak', alasanTolakPerubahan: alasan });
+          patchSubmission(targetId, { perubahanStatus: 'revisi', catatanRevisiPerubahan: catatan });
           set((s) => ({
             approvalHistory: [
               ...s.approvalHistory,
-              makeLogEntry({ dokumen: 'perubahan', aksi: 'reject', oleh, peran: 'pemberi', alasan, submissionId: targetId }),
+              makeLogEntry({ dokumen: 'perubahan', aksi: 'ajukan_ulang', oleh, peran: 'pemberi', alasan: catatan, submissionId: targetId }),
             ],
           }));
         },

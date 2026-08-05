@@ -16,7 +16,7 @@ const navItems = [
     section: 'REVIEW',
     items: [
       { icon: ClipboardList, label: 'Approval Management', href: '/dashboard/pemberi/approval-management' },
-      { icon: FileText, label: 'Data Management', href: '/dashboard/pemberi/data-management' },
+      { icon: FileText, label: 'Audit Trail Persetujuan', href: '/dashboard/pemberi/audit-trailpersetujuan' },
     ],
   },
 ];
@@ -26,6 +26,7 @@ export default function PemberiLayout({ children }: { children: React.ReactNode 
   const pathname = usePathname();
   const { user, isAuthenticated, isHydrated, logout } = useAuthStore();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
 
   useEffect(() => {
     if (isHydrated && !isAuthenticated) {
@@ -83,20 +84,11 @@ export default function PemberiLayout({ children }: { children: React.ReactNode 
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '11px' }}>
-            <div style={{
-              width: 38, height: 38, borderRadius: 11,
-              background: 'linear-gradient(160deg, #2563EB 0%, #1d4ed8 100%)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontWeight: 800, color: '#fff', fontSize: '0.95rem',
-              boxShadow: '0 3px 10px rgba(37,99,235,0.3)',
-            }}>S</div>
-            <div style={{ lineHeight: 1.25 }}>
-              <p style={{ color: '#0f172a', fontWeight: 700, fontSize: '0.92rem', margin: 0 }}>SIKA</p>
-              <p style={{
-                color: '#64748b', fontSize: '0.6rem', margin: 0,
-                fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase',
-              }}>Surat Izin Kerja</p>
-            </div>
+            <img
+              src="/logopertaminagasfull.svg"
+              alt="Pertamina Gas"
+              style={{ height: 50, objectFit: 'contain' }}
+            />
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
@@ -142,18 +134,6 @@ export default function PemberiLayout({ children }: { children: React.ReactNode 
               {user.jabatan}
             </p>
           </div>
-          <button
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer', padding: '6px',
-              borderRadius: 8, display: 'flex', alignItems: 'center', flexShrink: 0,
-              transition: 'background 0.15s',
-              color: '#64748b',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#0f172a'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = '#64748b'; }}
-          >
-            <Bell size={15} />
-          </button>
         </div>
 
         <nav className="pemberi-nav-scroll" style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
@@ -260,7 +240,7 @@ export default function PemberiLayout({ children }: { children: React.ReactNode 
       <button
         onClick={() => setSidebarOpen(true)}
         style={{
-          position: 'fixed', top: 14, left: 16, zIndex: 30,
+          position: 'fixed', top: 18, left: 16, zIndex: 30,
           background: '#ffffff', border: '1px solid #e5e7eb', cursor: 'pointer',
           padding: '8px', borderRadius: 9, color: '#475569',
           display: sidebarOpen ? 'none' : 'flex', alignItems: 'center',
@@ -272,6 +252,25 @@ export default function PemberiLayout({ children }: { children: React.ReactNode 
       >
         <Menu size={20} />
       </button>
+
+      <div style={{ position: 'fixed', top: 20, right: 16, zIndex: 53 }}>
+        <button
+          onClick={() => setNotifOpen((v) => !v)}
+          aria-label="Notifikasi"
+          style={{
+            position: 'relative',
+            background: notifOpen ? '#eff6ff' : '#ffffff',
+            border: `1px solid ${notifOpen ? '#bfdbfe' : '#e5e7eb'}`,
+            cursor: 'pointer', padding: '8px', borderRadius: 9,
+            color: notifOpen ? '#2563EB' : '#475569',
+            display: 'flex', alignItems: 'center',
+            boxShadow: notifOpen ? '0 2px 8px rgba(37,99,235,0.15)' : '0 1px 3px rgba(0,0,0,0.07)',
+            transition: 'background 0.15s, box-shadow 0.15s, border-color 0.15s',
+          }}
+        >
+          <Bell size={18} />
+        </button>
+      </div>
 
       {children}
     </div>
