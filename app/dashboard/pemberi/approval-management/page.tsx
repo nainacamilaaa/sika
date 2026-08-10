@@ -1063,19 +1063,17 @@ export default function PemberiApprovalManagementPage() {
 
   return (
     <div className="min-h-screen bg-gray-100">
-
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
-          <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
-          <div className="w-px h-10 bg-gray-200" />
-          <div className="flex flex-col leading-tight">
-            <span className="text-sm font-bold text-gray-800">Approval Management</span>
+          <div className="flex flex-col leading-tight border-l-4 border-blue-600 pl-3">
+            <span className="text-sm font-bold text-gray-800 tracking-tight">Approval Management</span>
             <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
               Pemberi Kerja
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-4 pr-6">
+
+        <div className="flex items-center gap-4" style={{ paddingRight: '38px' }}>
           <img
             src="/logopertaminagasfull.svg"
             alt="Pertamina Gas"

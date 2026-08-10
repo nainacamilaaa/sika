@@ -72,11 +72,6 @@ export default function DashboardPemberi() {
           </div>
         </div>
         <div className="flex items-center gap-4" style={{ paddingRight: '38px' }}>
-          <img
-            src="/logosika.svg"
-            alt="SIKA"
-            className="h-9 object-contain"
-          />
           <div className="w-px h-10 bg-gray-200" />
           <img
             src="/logopertaminagasfull.svg"

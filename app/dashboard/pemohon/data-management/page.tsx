@@ -5,12 +5,16 @@ import { useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Search, FileText, MapPin,
   CheckCircle, XCircle, Clock, AlertCircle, ChevronRight, Filter,
-  CalendarDays, Calendar, ChevronDown,
+  Calendar, ChevronDown, PauseCircle,
   TrendingUp, TrendingDown, Activity, ClipboardCheck,
   Loader2, RefreshCcw
 } from 'lucide-react';
-import { useProgramStore, getNomorSika, getOverallStatus } from '@/store/programStore';
+import {
+  useProgramStore, getNomorSika, getOverallStatus,
+  getRevalidasiOverride, MAX_HARI_REVALIDASI,
+} from '@/store/programStore';
 import type { ApprovalStatus, OverallStatus } from '@/store/programStore';
+import { useAuthStore } from '@/store/authStore';
 import {
   ResponsiveContainer, Tooltip, Legend,
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -18,7 +22,7 @@ import {
   AreaChart, Area
 } from 'recharts';
 
-type TabType = 'semua' | 'aktif' | 'pending' | 'ditolak' | 'closed';
+type TabType = 'semua' | 'aktif' | 'suspend' | 'pending' | 'ditolak' | 'closed';
 type TimeFilterType = 'hari' | 'minggu' | 'bulan' | 'tahun' | 'custom';
 
 interface SIKARow {
@@ -42,6 +46,10 @@ interface SIKARow {
   // untuk submission ini — datang dari store, bukan state lokal, supaya
   // tidak hilang saat reload.
   riwayatRevalidasi: string[];
+  // Pengajuan pemulihan yang sedang berjalan setelah submission ini sempat
+  // "Suspend" (lihat getRevalidasiOverride di store). null = tidak ada
+  // pengajuan yang sedang berjalan.
+  revalidasiSuspendRequest: { tanggal: string; status: 'menunggu' | 'ditolak'; alasanTolak?: string | null } | null;
   // Status perubahan data (sertifikat/pekerja baru dll) yang diajukan lewat
   // "Kirim Konfirmasi Revalidasi" di Detail Program — terpisah dari status
   // approval utama, lihat programStore.ts. 'revisi' (bukan 'ditolak'):
@@ -56,15 +64,20 @@ interface SIKARow {
 // OverallStatus & getOverallStatus sekarang diimpor dari store (lihat import
 // di atas) supaya Data Management dan Detail Program pakai logika status
 // yang persis sama, tidak ada risiko dua definisi yang diam-diam beda.
+// Begitu juga getRevalidasiOverride/MAX_HARI_REVALIDASI: itu satu-satunya
+// tempat yang menentukan kapan submission 'aktif' dianggap 'suspend' atau
+// otomatis 'closed' karena telat revalidasi — dipakai bareng oleh badge
+// status, tab/counter, dan kolom "Revalidasi" supaya semuanya konsisten.
 
 /* ============================================================
    BOLD PERTAMINA GAS PALETTE
    merah #E31E24 · kuning emas #F2A900 · hijau #00954E
-   biru #0E76BC · navy #1B2A4A · abu #4B5568 / #8A94A6
+   biru #0E76BC · navy #1B2A4A · abu #4B5568 / #8A94A6 · oranye #EA580C
 ============================================================ */
 
 const STATUS_CONFIG: Record<OverallStatus, { label: string; bg: string; icon: any }> = {
   aktif:   { label: 'Aktif',   bg: '#00954E', icon: CheckCircle },
+  suspend: { label: 'Suspend', bg: '#EA580C', icon: PauseCircle },
   pending: { label: 'Pending', bg: '#0E76BC', icon: Clock },
   ditolak: { label: 'Ditolak', bg: '#E31E24', icon: XCircle },
   closed:  { label: 'Closed',  bg: '#4B5568', icon: CheckCircle },
@@ -190,8 +203,6 @@ function BarTooltip({ active, payload, label }: any) {
   );
 }
 
-const MAX_HARI_REVALIDASI = 7;
-
 // Field `berlakuHingga` pada data SIKA BUKAN daftar tanggal — melainkan 6
 // karakter digit terpisah [D,D,M,M,Y,Y] hasil input kotak tanggal di form
 // (lihat komponen <DateBoxes/> di halaman review/detail). Sebelumnya kode
@@ -268,6 +279,11 @@ function filterByTime(rows: SIKARow[], filter: TimeFilterType, customRange?: { s
    pengajuan. Begitu hari ini sudah divalidasi, aksi terkunci
    sampai hari berikutnya (locking berbasis tanggal kalender,
    otomatis reset saat berganti hari).
+
+   Kalau kemarin TIDAK divalidasi, submission otomatis dianggap
+   "Suspend" (lihat getRevalidasiOverride yang diimpor dari store) dan
+   pemulihannya WAJIB lewat approval Pemberi Kerja — beda dari
+   revalidasi harian biasa yang cukup self-certify.
 ============================================================ */
 
 type RevalidasiDayStatus = 'validated' | 'due' | 'missed' | 'upcoming';
@@ -320,10 +336,10 @@ function getRevalidasiDays(tanggalPengajuan: string, validatedDates: string[]): 
 }
 
 const REVALIDASI_SEGMENT_COLOR: Record<RevalidasiDayStatus, string> = {
-  validated: '#00954E',
-  due: '#E31E24',
-  missed: '#00954E',
-  upcoming: '#E2E5EA',
+  validated: '#00954E', // hijau — sudah direvalidasi hari itu
+  due: '#E31E24',       // merah — hari ini, belum divalidasi
+  missed: '#E31E24',    // merah — hari itu terlewat tanpa revalidasi (pemicu Suspend)
+  upcoming: '#E2E5EA',  // abu netral — belum jadi giliran hari itu
 };
 
 function RevalidasiCell({
@@ -349,48 +365,98 @@ function RevalidasiCell({
     return <span className="text-[10px] text-gray-300 italic">-</span>;
   }
 
+  // Satu-satunya sumber kebenaran soal suspend/auto-closed — sama persis
+  // dengan yang dipakai getFinalStatus() di bawah untuk badge status,
+  // supaya kolom "Revalidasi" dan badge "Status" tidak pernah beda cerita.
+  const override = baseStatus === 'aktif' ? getRevalidasiOverride(tanggalPengajuan, validatedDates) : null;
+  const isSuspended = override === 'suspend';
+  const isAutoClosed = override === 'closed';
+
   const hariKe = getHariKeIni(tanggalPengajuan);
-  const sudahLewatBatas = hariKe > MAX_HARI_REVALIDASI;
   const hariKeDitampilkan = Math.min(Math.max(hariKe, 1), MAX_HARI_REVALIDASI);
   const hariIni = days.find(d => d.dayNumber === hariKeDitampilkan);
   const sudahValidasiHariIni = hariIni?.status === 'validated';
   const perubahanMenunggu = row.perubahanStatus === 'menunggu';
   const perubahanPerluRevisi = row.perubahanStatus === 'revisi';
+  const suspendMenunggu = row.revalidasiSuspendRequest?.status === 'menunggu';
+  const suspendDitolak = row.revalidasiSuspendRequest?.status === 'ditolak';
 
-  const perluAksi = baseStatus === 'aktif' && !sudahLewatBatas && !sudahValidasiHariIni && !perubahanMenunggu;
+  const perluAksi = !isAutoClosed && !isSuspended && !sudahValidasiHariIni && !perubahanMenunggu;
 
   return (
     <div className="flex flex-col gap-1.5 w-40">
       {/* Baris atas: progres hari + status singkat */}
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-bold text-gray-600">
-          Hari {sudahLewatBatas ? MAX_HARI_REVALIDASI : hariKeDitampilkan}
+          Hari {isAutoClosed ? MAX_HARI_REVALIDASI : hariKeDitampilkan}
           <span className="font-medium text-gray-300">/{MAX_HARI_REVALIDASI}</span>
         </span>
-        {sudahValidasiHariIni && !sudahLewatBatas && (
+        {sudahValidasiHariIni && !isAutoClosed && !isSuspended && (
           <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold" style={{ color: '#00954E' }}>
             <CheckCircle size={9} strokeWidth={3} /> Tervalidasi
+          </span>
+        )}
+        {isSuspended && (
+          <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold" style={{ color: '#EA580C' }}>
+            <PauseCircle size={9} strokeWidth={3} /> Suspend
           </span>
         )}
       </div>
 
       <div className="flex items-center gap-1 p-0.5 rounded-full bg-gray-100">
-  {days.map((d) => (
-    <span
-      key={d.date}
-      title={`Hari ke-${d.dayNumber} · ${formatDateID(d.date)}`}
-      className="flex-1 h-2 rounded-full"
-      style={{
-        background: REVALIDASI_SEGMENT_COLOR[d.status],
-      }}
-    />
-  ))}
-</div>
+        {days.map((d) => (
+          <span
+            key={d.date}
+            title={`Hari ke-${d.dayNumber} · ${formatDateID(d.date)}`}
+            className="flex-1 h-2 rounded-full"
+            style={{ background: REVALIDASI_SEGMENT_COLOR[d.status] }}
+          />
+        ))}
+      </div>
+
+      {/* Lewat batas hari revalidasi → otomatis Closed, bukan lagi Aktif */}
+      {isAutoClosed && (
+        <p className="text-[10px] font-medium leading-snug" style={{ color: '#4B5568' }}>
+          Batas {MAX_HARI_REVALIDASI} hari terlampaui — SIKA otomatis Closed. Ajukan SIKA baru.
+        </p>
+      )}
+
+      {/* Suspend karena kemarin tidak direvalidasi — pemulihan wajib lewat
+          approval Pemberi Kerja, bukan self-certify langsung. */}
+      {!isAutoClosed && isSuspended && (
+        <div className="flex flex-col gap-1">
+          <p className="text-[10px] font-medium leading-snug" style={{ color: '#EA580C' }}>
+            Revalidasi kemarin terlewat, SIKA di-suspend.
+          </p>
+          {suspendMenunggu ? (
+            <p className="text-[10px] font-medium leading-snug" style={{ color: '#F2A900' }}>
+              Menunggu persetujuan Pemberi Kerja untuk aktif kembali.
+            </p>
+          ) : (
+            <>
+              {suspendDitolak && row.revalidasiSuspendRequest?.alasanTolak && (
+                <p className="text-[10px] text-red-500 leading-snug">
+                  Ditolak: {row.revalidasiSuspendRequest.alasanTolak}
+                </p>
+              )}
+              <button
+                onClick={() => onAjukan(row.id)}
+                className="inline-flex items-center justify-center gap-1 text-[10px] font-semibold text-white rounded-lg px-2.5 py-1.5 transition shadow-sm w-fit"
+                style={{ background: '#EA580C' }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#c2410c'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = '#EA580C'; }}
+              >
+                <PauseCircle size={11} /> {suspendDitolak ? 'Ajukan Ulang Pemulihan' : 'Ajukan Pemulihan'}
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Perubahan/revalidasi yang diajukan pemohon diminta direvisi Pemberi
           Kerja — beri jalan keluar yang jelas, bukan cuma teks statis, supaya
           pemohon langsung tahu langkah selanjutnya. */}
-      {perubahanPerluRevisi && (
+      {!isAutoClosed && !isSuspended && perubahanPerluRevisi && (
         <div className="flex flex-col gap-1">
           <p className="text-[10px] font-medium leading-snug" style={{ color: '#E31E24' }}>
             Pemberi Kerja meminta revisi atas perubahan yang diajukan.
@@ -407,7 +473,7 @@ function RevalidasiCell({
         </div>
       )}
 
-      {!perubahanPerluRevisi && perluAksi && (
+      {!isAutoClosed && !isSuspended && !perubahanPerluRevisi && perluAksi && (
         <button
           onClick={() => onAjukan(row.id)}
           className="inline-flex items-center justify-center gap-1 text-[10px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg px-2.5 py-1.5 transition shadow-sm w-fit"
@@ -416,21 +482,15 @@ function RevalidasiCell({
         </button>
       )}
 
-      {perubahanMenunggu && (
-        <p className="text-[10px] font-medium leading-snug" style={{ color: '#F2A900' }}>
+      {!isAutoClosed && !isSuspended && perubahanMenunggu && (
+        <p className="text-[10px] font-medium leading-snug" style={{ color: '#E31E24' }}>
           Menunggu persetujuan perubahan dari Pemberi Kerja.
         </p>
       )}
 
-      {!perubahanMenunggu && !perubahanPerluRevisi && sudahValidasiHariIni && !sudahLewatBatas && (
+      {!isAutoClosed && !isSuspended && !perubahanMenunggu && !perubahanPerluRevisi && sudahValidasiHariIni && (
         <p className="text-[10px] text-gray-400 leading-snug">
           Validasi berikutnya dibuka besok.
-        </p>
-      )}
-
-      {sudahLewatBatas && (
-        <p className="text-[10px] font-medium leading-snug" style={{ color: '#E31E24' }}>
-          Batas 7 hari terlampaui &mdash; ajukan SIKA baru.
         </p>
       )}
     </div>
@@ -439,10 +499,12 @@ function RevalidasiCell({
 
 function RevalidasiModal({
   row,
+  isSuspendRecovery = false,
   onClose,
   onSubmit,
 }: {
   row: SIKARow;
+  isSuspendRecovery?: boolean;
   onClose: () => void;
   onSubmit: (data: { catatan: string }) => void;
 }) {
@@ -497,11 +559,19 @@ function RevalidasiModal({
         {/* HEADER */}
         <div
           className="px-6 py-4 flex items-center justify-between shrink-0"
-          style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}
+          style={{
+            background: isSuspendRecovery
+              ? 'linear-gradient(135deg, #c2410c 0%, #EA580C 100%)'
+              : 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)',
+          }}
         >
           <div className="leading-tight">
-            <p className="text-white font-bold text-sm">Revalidasi Harian SIKA</p>
-            <p className="text-[10px] text-white/70 font-medium">Hari ke-{hariKe} dari {MAX_HARI_REVALIDASI}</p>
+            <p className="text-white font-bold text-sm">
+              {isSuspendRecovery ? 'Pemulihan SIKA (Suspend)' : 'Revalidasi Harian SIKA'}
+            </p>
+            <p className="text-[10px] text-white/70 font-medium">
+              {isSuspendRecovery ? 'Perlu persetujuan Pemberi Kerja' : `Hari ke-${hariKe} dari ${MAX_HARI_REVALIDASI}`}
+            </p>
           </div>
         </div>
 
@@ -520,11 +590,18 @@ function RevalidasiModal({
                 <span
                   key={idx}
                   className="flex-1 h-1.5 rounded-full"
-                  style={{ background: idx < hariKe - 1 ? '#00954E' : idx === hariKe - 1 ? '#E31E24' : '#E2E5EA' }}
+                  style={{ background: idx < hariKe - 1 ? '#00954E' : idx === hariKe - 1 ? (isSuspendRecovery ? '#EA580C' : '#E31E24') : '#E2E5EA' }}
                 />
               ))}
             </div>
           </div>
+
+          {isSuspendRecovery && (
+            <div className="mx-6 mt-4 px-3.5 py-2.5 rounded-lg text-[11px] font-medium leading-relaxed" style={{ background: '#EA580C14', color: '#c2410c' }}>
+              SIKA ini sempat ter-suspend karena revalidasi kemarin terlewat. Pengajuan ini akan dikirim ke
+              Pemberi Kerja untuk disetujui dulu sebelum SIKA aktif kembali.
+            </div>
+          )}
 
           <div className="px-6 py-4 space-y-4">
             <fieldset
@@ -633,7 +710,7 @@ function RevalidasiModal({
             Revalidasi harian bertujuan memastikan kondisi pekerjaan masih sesuai dengan SIKA dan JSA yang telah disetujui. 
             Wajib dilakukan <span className="font-semibold text-gray-500">sekali sehari</span>, paling lambat{' '}
             <span className="font-semibold text-gray-500">{MAX_HARI_REVALIDASI} hari</span> sejak tanggal pengajuan. 
-            Jika melewati batas tersebut, Anda harus mengajukan SIKA baru.
+            Jika melewati batas tersebut, SIKA otomatis Closed dan Anda harus mengajukan SIKA baru.
           </p>
           </div>
         </div>
@@ -652,12 +729,14 @@ function RevalidasiModal({
             onClick={() => semuaTerkonfirmasi && onSubmit({ catatan })}
             className={`inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg transition ${
               semuaTerkonfirmasi && !redirecting
-                ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm'
+                ? isSuspendRecovery
+                  ? 'bg-orange-600 hover:bg-orange-700 text-white shadow-sm'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm'
                 : 'bg-gray-200 text-gray-400 cursor-not-allowed'
             }`}
           >
             <CheckCircle size={13} strokeWidth={2.5} />
-            Konfirmasi Revalidasi
+            {isSuspendRecovery ? 'Ajukan Pemulihan ke Pemberi' : 'Konfirmasi Revalidasi'}
           </button>
         </div>
       </div>
@@ -673,14 +752,15 @@ export default function PemohonMonitoringPage() {
     submissions,
     sertifikatData,
     catatRevalidasi,
+    ajukanRevalidasiSuspend,
     startNewDraft,
     openSubmission,
   } = useProgramStore();
+  const { user } = useAuthStore();
 
   const [activeTab, setActiveTab] = useState<TabType>('semua');
   const [search, setSearch] = useState('');
   const [filterLokasi, setFilterLokasi] = useState('');
-  const [filterSertifikat, setFilterSertifikat] = useState('');
   const [filterSifat, setFilterSifat] = useState('');
   const [filterAreaChart, setFilterAreaChart] = useState('');
   const [showFilter, setShowFilter] = useState(false);
@@ -693,7 +773,6 @@ export default function PemohonMonitoringPage() {
     end: '',
   });
   const [showCustomRange, setShowCustomRange] = useState(false);
-  const [isTimeDropdownOpen, setIsTimeDropdownOpen] = useState(false);
 
   // Satu baris per submission yang sudah di-"Request Review" oleh pemohon
   // (lihat submitToPemberi di store). Draft yang belum pernah disubmit
@@ -726,6 +805,7 @@ export default function PemohonMonitoringPage() {
         sifatPekerjaan: sub.sika.sifatPekerjaan || '-',
         identifikasiBahaya: sub.sika.identifikasi || [],
         riwayatRevalidasi: sub.riwayatRevalidasi,
+        revalidasiSuspendRequest: sub.revalidasiSuspendRequest,
         perubahanStatus: sub.perubahanStatus,
         catatanRevisiPerubahan: sub.catatanRevisiPerubahan,
         createdAt: sub.createdAt,
@@ -734,16 +814,28 @@ export default function PemohonMonitoringPage() {
     });
   }, [submissions]);
 
-  const getFinalStatus = (row: SIKARow): OverallStatus =>
-    getOverallStatus(row.sikaStatusPemberi, row.jsaStatusPemberi, row.sikaStatusPJA, row.jsaStatusPJA);
+  // Status dasar (murni approval Pemberi/PJA) + lapisan override revalidasi
+  // (Suspend / auto-Closed) digabung jadi satu di sini — satu-satunya
+  // tempat yang menentukan status final tiap baris, dipakai untuk tab,
+  // counter, badge, dan chart supaya semuanya konsisten.
+  const getFinalStatus = (row: SIKARow): OverallStatus => {
+    const base = getOverallStatus(row.sikaStatusPemberi, row.jsaStatusPemberi, row.sikaStatusPJA, row.jsaStatusPJA);
+    if (base !== 'aktif') return base;
+    const override = getRevalidasiOverride(row.createdAt || row.tanggalKontrak, row.riwayatRevalidasi);
+    return override ?? base;
+  };
 
   // Override tampilan badge jadi "Perlu Revisi" kalau Pemberi Kerja minta
   // revisi atas pengajuan perubahan (revalidasi) — status ini terpisah dari
-  // getFinalStatus (yang menghitung status approval SIKA/JSA utama), tapi
-  // perlu tampil di badge biar pemohon langsung sadar ada yang perlu
-  // dilengkapi, walau SIKA/JSA yang sudah aktif tidak ikut berubah.
-  const getDisplayStatus = (row: SIKARow): DisplayStatus =>
-    row.perubahanStatus === 'revisi' ? 'revisi' : getFinalStatus(row);
+  // getFinalStatus, tapi perlu tampil di badge biar pemohon langsung sadar
+  // ada yang perlu dilengkapi. Status 'closed' (baik dari approval PJA
+  // maupun auto-closed karena lewat batas revalidasi) lebih final dan tidak
+  // perlu ditimpa oleh overlay 'revisi'.
+  const getDisplayStatus = (row: SIKARow): DisplayStatus => {
+    const final = getFinalStatus(row);
+    if (final === 'closed') return 'closed';
+    return row.perubahanStatus === 'revisi' ? 'revisi' : final;
+  };
 
   const timeFilteredRows = useMemo(() => {
     return filterByTime(rows, timeFilter, customRange);
@@ -756,6 +848,7 @@ export default function PemohonMonitoringPage() {
       const matchTab =
         activeTab === 'semua' ? true :
         activeTab === 'aktif' ? overall === 'aktif' :
+        activeTab === 'suspend' ? overall === 'suspend' :
         activeTab === 'pending' ? overall === 'pending' || overall === 'draft' :
         activeTab === 'ditolak' ? overall === 'ditolak' :
         activeTab === 'closed' ? overall === 'closed' : true;
@@ -766,16 +859,16 @@ export default function PemohonMonitoringPage() {
         r.lokasi.toLowerCase().includes(search.toLowerCase());
 
       const matchLokasi = !filterLokasi || r.lokasi === filterLokasi;
-      const matchSertifikat = !filterSertifikat || r.sertifikatList.includes(filterSertifikat);
       const matchSifat = !filterSifat || r.sifatPekerjaan === filterSifat;
 
-      return matchTab && matchSearch && matchLokasi && matchSertifikat && matchSifat;
+      return matchTab && matchSearch && matchLokasi && matchSifat;
     });
-  }, [timeFilteredRows, activeTab, search, filterLokasi, filterSertifikat, filterSifat]);
+  }, [timeFilteredRows, activeTab, search, filterLokasi, filterSifat]);
 
   const counts = useMemo(() => ({
     semua: timeFilteredRows.length,
     aktif: timeFilteredRows.filter(r => getFinalStatus(r) === 'aktif').length,
+    suspend: timeFilteredRows.filter(r => getFinalStatus(r) === 'suspend').length,
     pending: timeFilteredRows.filter(r => ['pending', 'draft'].includes(getFinalStatus(r))).length,
     ditolak: timeFilteredRows.filter(r => getFinalStatus(r) === 'ditolak').length,
     closed: timeFilteredRows.filter(r => getFinalStatus(r) === 'closed').length,
@@ -794,7 +887,6 @@ export default function PemohonMonitoringPage() {
     'Project Management',
   ];
 
-  const allSertifikat = [...new Set(rows.flatMap(r => r.sertifikatList))];
   const allSifat = [...new Set(rows.map(r => r.sifatPekerjaan).filter(s => s && s !== '-'))];
 
   const statusChartData = useMemo(() => {
@@ -804,6 +896,7 @@ export default function PemohonMonitoringPage() {
 
     const c = {
       aktif: source.filter(r => getFinalStatus(r) === 'aktif').length,
+      suspend: source.filter(r => getFinalStatus(r) === 'suspend').length,
       pending: source.filter(r => ['pending', 'draft'].includes(getFinalStatus(r))).length,
       ditolak: source.filter(r => getFinalStatus(r) === 'ditolak').length,
       closed: source.filter(r => getFinalStatus(r) === 'closed').length,
@@ -811,6 +904,7 @@ export default function PemohonMonitoringPage() {
 
     return [
       { name: 'Aktif',   value: c.aktif,   color: '#00954E' },
+      { name: 'Suspend', value: c.suspend, color: '#EA580C' },
       { name: 'Pending', value: c.pending, color: '#0E76BC' },
       { name: 'Ditolak', value: c.ditolak, color: '#E31E24' },
       { name: 'Closed',  value: c.closed,  color: '#8A94A6' },
@@ -847,11 +941,12 @@ export default function PemohonMonitoringPage() {
         const base = {
           lokasi: l.replace('Operation ', '').replace(' Area', ''),
           lokasiFull: l,
-          aktif: 0, pending: 0, ditolak: 0, closed: 0, total: rowsDiArea.length,
+          aktif: 0, suspend: 0, pending: 0, ditolak: 0, closed: 0, total: rowsDiArea.length,
         };
         rowsDiArea.forEach(r => {
           const st = getFinalStatus(r);
           if (st === 'aktif') base.aktif++;
+          else if (st === 'suspend') base.suspend++;
           else if (st === 'pending' || st === 'draft') base.pending++;
           else if (st === 'ditolak') base.ditolak++;
           else if (st === 'closed') base.closed++;
@@ -868,28 +963,41 @@ export default function PemohonMonitoringPage() {
       lokasi: 'Semua Area',
       lokasiFull: '',
       aktif: acc.aktif + d.aktif,
+      suspend: acc.suspend + d.suspend,
       pending: acc.pending + d.pending,
       ditolak: acc.ditolak + d.ditolak,
       closed: acc.closed + d.closed,
       total: acc.total + d.total,
-    }), { lokasi: 'Semua Area', lokasiFull: '', aktif: 0, pending: 0, ditolak: 0, closed: 0, total: 0 });
+    }), { lokasi: 'Semua Area', lokasiFull: '', aktif: 0, suspend: 0, pending: 0, ditolak: 0, closed: 0, total: 0 });
     return [totalSemua];
   }, [lokasiChartData, filterAreaChart]);
 
   const TABS: { key: TabType; label: string; color: string }[] = [
     { key: 'semua',   label: 'Semua',   color: 'text-gray-700' },
     { key: 'aktif',   label: 'Aktif',   color: 'text-green-600' },
+    { key: 'suspend', label: 'Suspend', color: 'text-orange-600' },
     { key: 'pending', label: 'Pending', color: 'text-blue-600' },
     { key: 'ditolak', label: 'Ditolak', color: 'text-red-600' },
     { key: 'closed',  label: 'Closed',  color: 'text-gray-500' },
   ];
 
   const revalidasiModalRow = revalidasiModalRowId ? rows.find(r => r.id === revalidasiModalRowId) : undefined;
+  const revalidasiModalIsSuspend = revalidasiModalRow
+    ? getRevalidasiOverride(revalidasiModalRow.createdAt || revalidasiModalRow.tanggalKontrak, revalidasiModalRow.riwayatRevalidasi) === 'suspend'
+    : false;
 
+  // Kalau row-nya lagi Suspend, submit modal ini bukan self-certify
+  // langsung — tapi mengajukan pemulihan yang perlu approval Pemberi Kerja
+  // (ajukanRevalidasiSuspend). Selain itu (revalidasi harian biasa), tetap
+  // self-certify seperti sebelumnya lewat catatRevalidasi.
   const handleSubmitRevalidasi = (_data: { catatan: string }) => {
     if (!revalidasiModalRowId) return;
-    const todayKey = toDateKey(new Date());
-    catatRevalidasi(revalidasiModalRowId, todayKey);
+    if (revalidasiModalIsSuspend) {
+      ajukanRevalidasiSuspend(user?.name || 'Pemohon', revalidasiModalRowId);
+    } else {
+      const todayKey = toDateKey(new Date());
+      catatRevalidasi(revalidasiModalRowId, todayKey);
+    }
     setRevalidasiModalRowId(null);
   };
 
@@ -953,11 +1061,12 @@ export default function PemohonMonitoringPage() {
 
     <div className="px-6 py-6 space-y-4"> 
 
-        {/* STATISTIK - SEJAJAR 5 KOLOM (BOLD PERTAMINA GAS) */}
-        <div className="grid gap-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '0.75rem' }}>
+        {/* STATISTIK - SEJAJAR 6 KOLOM (BOLD PERTAMINA GAS) */}
+        <div className="grid gap-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: '0.75rem' }}>
           {[
             { label: 'Total SIKA', value: counts.semua,   bg: '#1B2A4A', sub: 'Semua pengajuan' },
             { label: 'Aktif',      value: counts.aktif,   bg: '#00954E', sub: 'Disetujui Pemberi' },
+            { label: 'Suspend',    value: counts.suspend, bg: '#EA580C', sub: 'Telat revalidasi' },
             { label: 'Pending',    value: counts.pending, bg: '#0E76BC', sub: 'Menunggu review' },
             { label: 'Ditolak',    value: counts.ditolak, bg: '#E31E24', sub: 'Perlu revisi' },
             { label: 'Closed',     value: counts.closed,  bg: '#4B5568', sub: 'Selesai diproses' },
@@ -987,71 +1096,77 @@ export default function PemohonMonitoringPage() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              {/* Time Filter Dropdown */}
-              <div className="relative">
-                <button
-                  onClick={() => setIsTimeDropdownOpen(!isTimeDropdownOpen)}
-                  className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-600 bg-white hover:bg-gray-50 transition shadow-sm"
-                >
-                  <Calendar size={14} />
-                  {timeFilterLabels[timeFilter]}
-                  {timeFilter === 'custom' && customRange.start && customRange.end && (
-                    <span className="text-[10px] text-blue-600 font-medium">
-                      {customRange.start} s/d {customRange.end}
-                    </span>
-                  )}
-                  <ChevronDown size={12} className="text-gray-400" />
-                </button>
-                {isTimeDropdownOpen && (
-                  <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-50">
-                    {(['hari', 'minggu', 'bulan', 'tahun'] as TimeFilterType[]).map((key) => (
+              {/* Time Filter — segmented control ala dashboard korporat,
+                  ganti dari dropdown menu supaya rentang waktu yang paling
+                  sering dipakai (Hari/Minggu/Bulan/Tahun) langsung terlihat
+                  dan bisa diklik 1x, tanpa perlu buka-tutup menu. */}
+              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                {(['hari', 'minggu', 'bulan', 'tahun'] as TimeFilterType[]).map((key) => (
+                  <button
+                    key={key}
+                    onClick={() => { setTimeFilter(key); setShowCustomRange(false); }}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all whitespace-nowrap ${
+                      timeFilter === key
+                        ? 'bg-white text-blue-700 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    {timeFilterLabels[key].replace(' Ini', '')}
+                  </button>
+                ))}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowCustomRange((v) => !v)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all whitespace-nowrap ${
+                      timeFilter === 'custom'
+                        ? 'bg-white text-blue-700 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    <Calendar size={12} />
+                    {timeFilter === 'custom' && customRange.start && customRange.end
+                      ? `${customRange.start} – ${customRange.end}`
+                      : 'Custom'}
+                    <ChevronDown size={11} className={`transition-transform ${showCustomRange ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showCustomRange && (
+                    <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-100 p-3.5 z-50 space-y-2.5">
+                      <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Pilih Rentang Tanggal</p>
+                      <div className="space-y-2">
+                        <div>
+                          <label className="text-[10px] text-gray-400 font-medium mb-1 block">Dari</label>
+                          <input
+                            type="date"
+                            value={customRange.start}
+                            onChange={(e) => setCustomRange({ ...customRange, start: e.target.value })}
+                            className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-gray-400 font-medium mb-1 block">Sampai</label>
+                          <input
+                            type="date"
+                            value={customRange.end}
+                            onChange={(e) => setCustomRange({ ...customRange, end: e.target.value })}
+                            className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
+                          />
+                        </div>
+                      </div>
                       <button
-                        key={key}
-                        onClick={() => { setTimeFilter(key); setIsTimeDropdownOpen(false); }}
-                        className={`w-full text-left px-4 py-2 text-xs hover:bg-blue-50 transition flex items-center gap-2 ${
-                          timeFilter === key ? 'text-blue-600 font-semibold bg-blue-50' : 'text-gray-600'
-                        }`}
-                      >
-                        <CalendarDays size={14} />
-                        {timeFilterLabels[key]}
-                      </button>
-                    ))}
-                    <div className="border-t border-gray-100 my-1" />
-                    <button
-                      onClick={() => { setShowCustomRange(!showCustomRange); setIsTimeDropdownOpen(false); }}
-                      className="w-full text-left px-4 py-2 text-xs hover:bg-blue-50 transition flex items-center gap-2 text-gray-600"
-                    >
-                      <Calendar size={14} />
-                      Custom Range
-                    </button>
-                    {showCustomRange && (
-                      <div className="px-4 py-3 border-t border-gray-100 space-y-2">
-                        <input
-                          type="date"
-                          value={customRange.start}
-                          onChange={(e) => setCustomRange({ ...customRange, start: e.target.value })}
-                          className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs"
-                        />
-                        <input
-                          type="date"
-                          value={customRange.end}
-                          onChange={(e) => setCustomRange({ ...customRange, end: e.target.value })}
-                          className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs"
-                        />
-                        <button
-                          onClick={() => {
+                        onClick={() => {
+                          if (customRange.start && customRange.end) {
                             setTimeFilter('custom');
                             setShowCustomRange(false);
-                            setIsTimeDropdownOpen(false);
-                          }}
-                          className="w-full bg-blue-600 text-white text-xs font-semibold py-1.5 rounded-lg hover:bg-blue-700 transition"
-                        >
-                          Terapkan
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
+                          }
+                        }}
+                        disabled={!customRange.start || !customRange.end}
+                        className="w-full bg-blue-600 disabled:bg-gray-200 disabled:text-gray-400 text-white text-xs font-semibold py-1.5 rounded-lg hover:bg-blue-700 transition"
+                      >
+                        Terapkan
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <select
@@ -1223,6 +1338,7 @@ export default function PemohonMonitoringPage() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-[10px] font-medium px-2.5 py-1 rounded-full text-white shadow-sm" style={{ background: '#1B2A4A' }}>Total {d.total}</span>
                     <span className="text-[10px] font-medium px-2.5 py-1 rounded-full text-white shadow-sm" style={{ background: '#00954E' }}>Aktif {d.aktif}</span>
+                    <span className="text-[10px] font-medium px-2.5 py-1 rounded-full text-white shadow-sm" style={{ background: '#EA580C' }}>Suspend {d.suspend}</span>
                     <span className="text-[10px] font-medium px-2.5 py-1 rounded-full text-white shadow-sm" style={{ background: '#0E76BC' }}>Pending {d.pending}</span>
                     <span className="text-[10px] font-medium px-2.5 py-1 rounded-full text-white shadow-sm" style={{ background: '#E31E24' }}>Ditolak {d.ditolak}</span>
                     <span className="text-[10px] font-medium px-2.5 py-1 rounded-full text-white shadow-sm" style={{ background: '#4B5568' }}>Closed {d.closed}</span>
@@ -1246,13 +1362,13 @@ export default function PemohonMonitoringPage() {
               <button
                 onClick={() => setShowFilter(!showFilter)}
                 className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition ${
-                  showFilter || filterLokasi || filterSertifikat || filterSifat
+                  showFilter || filterLokasi || filterSifat
                     ? 'bg-white text-blue-700 border-white'
                     : 'bg-white/20 text-white border-white/30 hover:bg-white/30'
                 }`}
               >
                 <Filter size={12} />
-                Filter {(filterLokasi || filterSertifikat || filterSifat) ? '(aktif)' : ''}
+                Filter {(filterLokasi || filterSifat) ? '(aktif)' : ''}
               </button>
               <span className="text-xs bg-white/20 text-white px-3 py-1 rounded-full font-medium">
                 {filtered.length} data
@@ -1311,17 +1427,6 @@ export default function PemohonMonitoringPage() {
                 </select>
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] text-gray-500 font-medium uppercase tracking-wide">Jenis Sertifikat</label>
-                <select
-                  value={filterSertifikat}
-                  onChange={(e) => setFilterSertifikat(e.target.value)}
-                  className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-blue-300 w-56"
-                >
-                  <option value="">Semua Sertifikat</option>
-                  {allSertifikat.map((s) => <option key={s}>{s}</option>)}
-                </select>
-              </div>
-              <div className="flex flex-col gap-1">
                 <label className="text-[10px] text-gray-500 font-medium uppercase tracking-wide">Sifat Pekerjaan</label>
                 <select
                   value={filterSifat}
@@ -1333,7 +1438,7 @@ export default function PemohonMonitoringPage() {
                 </select>
               </div>
               <button
-                onClick={() => { setFilterLokasi(''); setFilterSertifikat(''); setFilterSifat(''); }}
+                onClick={() => { setFilterLokasi(''); setFilterSifat(''); }}
                 className="text-xs text-gray-400 hover:text-red-500 transition px-2 py-1.5"
               >
                 Reset filter
@@ -1372,7 +1477,6 @@ export default function PemohonMonitoringPage() {
                 <tbody>
                   {filtered.map((row, i) => {
                     const baseStatus = getOverallStatus(row.sikaStatusPemberi, row.jsaStatusPemberi, row.sikaStatusPJA, row.jsaStatusPJA);
-                    const overall = getFinalStatus(row);
                     const displayStatus = getDisplayStatus(row);
                     const hasTolak = row.alasanTolakSika || row.alasanTolakJsa;
                     const sisaHari = hitungSisaHari(row.tanggalBerakhirSIKA);
@@ -1455,7 +1559,7 @@ export default function PemohonMonitoringPage() {
                               </div>
                             )}
                             {row.perubahanStatus === 'menunggu' && (
-                              <div className="text-[10px] leading-tight max-w-28" style={{ color: '#F2A900' }}>
+                              <div className="text-[10px] leading-tight max-w-28" style={{ color: '#E31E24' }}>
                                 Perubahan menunggu approval Pemberi
                               </div>
                             )}
@@ -1499,6 +1603,7 @@ export default function PemohonMonitoringPage() {
       {revalidasiModalRow && (
         <RevalidasiModal
           row={revalidasiModalRow}
+          isSuspendRecovery={revalidasiModalIsSuspend}
           onClose={() => setRevalidasiModalRowId(null)}
           onSubmit={handleSubmitRevalidasi}
         />
