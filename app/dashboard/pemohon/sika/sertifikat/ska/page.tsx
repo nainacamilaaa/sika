@@ -336,13 +336,11 @@ export default function SKAPage() {
   return (
     <div className="min-h-screen bg-gray-100">
 
-      {/* TOP NAVBAR - Disamakan dengan SKP */}
+       {/* TOP NAVBAR */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
-        <div className="flex items-center gap-3" style={{ paddingLeft: '30px' }}>
-          <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
-          <div className="w-px h-10 bg-gray-200" />
-          <div className="flex flex-col leading-tight">
-            <span className="text-sm font-bold text-gray-800">Entry Data</span>
+        <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
+          <div className="flex flex-col leading-tight border-l-4 border-blue-600 pl-3">
+            <span className="text-sm font-bold text-gray-800 tracking-tight">Entry Data</span>
             <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
               Sertifikat Kerja Pengangkatan
             </span>

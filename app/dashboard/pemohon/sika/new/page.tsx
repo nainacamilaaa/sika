@@ -36,8 +36,6 @@ const CheckItem = ({
   </label>
 );
 
-// Converts a native <input type="date"> value ("YYYY-MM-DD") into the 6
-// digit boxes this form uses: [D, D, M, M, Y, Y] (day, month, last-2-digit year)
 const isoDateToDigits = (iso: string): string[] => {
   if (!iso) return Array(6).fill('');
   const [y, m, d] = iso.split('-');
@@ -45,8 +43,6 @@ const isoDateToDigits = (iso: string): string[] => {
   return [d[0], d[1], m[0], m[1], y.slice(2, 3), y.slice(3, 4)];
 };
 
-// Converts the 6 digit boxes back into an ISO date string so the native
-// picker can show the previously chosen date when reopened.
 const digitsToIsoDate = (digits: string[]): string => {
   if (digits.some((d) => d === '')) return '';
   const [d1, d2, m1, m2, y1, y2] = digits;
@@ -56,12 +52,8 @@ const digitsToIsoDate = (digits: string[]): string => {
   return `${year}-${month}-${day}`;
 };
 
-// Converts a native <input type="time"> value ("HH:MM") into this form's
-// "00.00" text representation.
 const timeValueToDisplay = (val: string): string => (val ? val.replace(':', '.') : '');
 
-// Converts this form's "00.00" text representation back into "HH:MM" so the
-// native time picker can show the previously chosen time when reopened.
 const displayToTimeValue = (val: string): string => {
   if (!val) return '';
   const cleaned = val.replace('.', ':');
@@ -76,7 +68,6 @@ export default function SikaNewPage() {
     if (!program) router.replace('/dashboard/pemohon/program/new');
   }, [program]);
 
-  // ---------- Section 0: Bagian 1 - Tanggal Terbit / Jam Kerja / Berlaku Hingga ----------
   const [tanggalTerbit, setTanggalTerbit] = useState<string[]>(
     sika?.tanggalTerbit?.length === 6 ? sika.tanggalTerbit : Array(6).fill('')
   );
@@ -90,8 +81,6 @@ export default function SikaNewPage() {
   const [noSikaNomorUrut, setNoSikaNomorUrut] = useState(sika?.noSikaNomorUrut || '');
   const [lanjutanDariSika, setLanjutanDariSika] = useState(sika?.lanjutanDariSika || '');
 
-  // Hidden native pickers that back the digit boxes / time boxes above, so
-  // the person picks a date/time instead of typing each character manually.
   const tanggalTerbitPickerRef = useRef<HTMLInputElement>(null);
   const berlakuHinggaPickerRef = useRef<HTMLInputElement>(null);
   const jamMulaiPickerRef = useRef<HTMLInputElement>(null);
@@ -100,15 +89,11 @@ export default function SikaNewPage() {
   const openPicker = (ref: React.RefObject<HTMLInputElement | null>) => {
     const el = ref.current;
     if (!el) return;
-    // showPicker() is supported in modern Chromium/Edge/Firefox; fall back
-    // to a focus+click for browsers that don't support it yet.
     if (typeof (el as any).showPicker === 'function') {
       try {
         (el as any).showPicker();
         return;
-      } catch {
-        // fall through to the fallback below
-      }
+      } catch {}
     }
     el.focus();
     el.click();
@@ -122,7 +107,6 @@ export default function SikaNewPage() {
     setter((prev) => prev.map((c, i) => (i === index ? val : c)));
   };
 
-  // ---------- Section 1: Jenis Pekerjaan (formerly sika/new) ----------
   const [form, setForm] = useState({
     fungsiPerusahaan: sika?.fungsiPerusahaan || program?.pelaksanaPerusahaan || '',
     lokasiInstalasi: sika?.lokasiInstalasi || program?.lokasiKerja || '',
@@ -190,7 +174,6 @@ export default function SikaNewPage() {
         : 'border-gray-300 focus:ring-blue-400'
     }`;
 
-  // ---------- Section 2: Pemeriksaan (formerly sika/pemeriksaan) ----------
   const isolasiCol1 = ['Electrical Circuits', 'Gas Valve', 'Water Valves'];
   const isolasiCol2 = ['Air Instrument Valves', 'Mekanik', 'Pneumatic/Hydraulic'];
 
@@ -360,9 +343,6 @@ export default function SikaNewPage() {
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* Kills the native browser placeholder text (mm/dd/yyyy, --:--) and
-          the default calendar/clock icon that render inside hidden
-          date/time inputs, which was overlapping the custom digit boxes. */}
       <style jsx global>{`
         input[type="date"]::-webkit-datetime-edit,
         input[type="date"]::-webkit-datetime-edit-fields-wrapper,
@@ -393,12 +373,10 @@ export default function SikaNewPage() {
 
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
-          <img src="/logosika.svg" alt="SIKA" className="h-8 object-contain" style={{ marginTop: '3px' }} />
-          <div className="w-px h-10 bg-gray-200" />
-          <div className="flex flex-col leading-tight">
-            <span className="text-sm font-bold text-gray-800">SIKA</span>
+          <div className="flex flex-col leading-tight border-l-4 border-blue-600 pl-3">
+            <span className="text-sm font-bold text-gray-800 tracking-tight">SIKA</span>
             <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
-              Surat Izin Kerja 
+              Surat Izin Kerja
             </span>
           </div>
         </div>
@@ -436,10 +414,8 @@ export default function SikaNewPage() {
 
       <div className="px-6 pt-3 pb-6 space-y-4">
 
-        {/* ===== Single wrapping container for the whole SIKA form ===== */}
       <div className="bg-white rounded-xl border border-gray-300 shadow-sm overflow-hidden">
 
-        {/* ----- HEADER UTAMA PENGISIAN SIKA ----- */}
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between rounded-t-xl"
           style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
           <div>
@@ -451,7 +427,6 @@ export default function SikaNewPage() {
           </span>
         </div>
 
-        {/* ----- Nomor SIKA / Lanjutan dari SIKA ----- */}
         <div className="flex flex-wrap items-stretch text-xs border-b border-gray-300">
           <div className="flex items-center flex-1 min-w-[320px] border-b border-gray-300">
             <div
@@ -497,7 +472,6 @@ export default function SikaNewPage() {
           </div>
         </div>
 
-        {/* ----- Bagian 1: Tanggal Terbit / Jam Kerja / Berlaku Hingga ----- */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-6 py-4 text-sm border-b border-gray-300 bg-white">
           <div className="flex items-center gap-2">
             <span className="font-bold text-black-800 whitespace-nowrap">BAGIAN 1 - TANGGAL TERBIT</span>
@@ -604,7 +578,6 @@ export default function SikaNewPage() {
           </div>
         </div>
 
-     {/* ----- Section 1: Jenis Pekerjaan ----- */}
     <div className="border-b border-gray-300">
       <div className="px-6 py-4 border-b border-gray-200 bg-white">
         <div className="flex items-center gap-6">
@@ -748,7 +721,6 @@ export default function SikaNewPage() {
           </div>
         </div>
 
-        {/* ----- Bagian 3 - Pemeriksaan header ----- */}
         <div className="flex items-center gap-6 px-6 py-3 bg-white border-b border-gray-300">
           <span className="text-sm font-bold text-gray-800 whitespace-nowrap">
             BAGIAN 3 - PEMERIKSAAN
@@ -778,7 +750,6 @@ export default function SikaNewPage() {
           </label>
         </div>
 
-        {/* ----- Section 2: Isolasi & Lampiran ----- */}
         <div className="grid grid-cols-2 border-b border-gray-300">
           <div className="border-r border-gray-300">
             <div className="px-5 py-3 border-b border-gray-200 bg-white">
@@ -809,7 +780,6 @@ export default function SikaNewPage() {
           </div>
         </div>
 
-        {/* ----- Section 3: Identifikasi Bahaya ----- */}
         <div className="border-b border-gray-300">
           <div className="px-5 py-3 border-b border-gray-200 bg-white">
             <span className="text-gray-800 font-bold text-xs tracking-wide">IDENTIFIKASI BAHAYA</span>
@@ -833,7 +803,6 @@ export default function SikaNewPage() {
           </div>
         </div>
 
-        {/* ----- Section 4: Pengendalian Bahaya ----- */}
         <div>
           <div className="px-5 py-3 border-b border-gray-200 bg-white">
             <span className="text-gray-800 font-bold text-xs tracking-wide">PENGENDALIAN BAHAYA</span>
@@ -859,7 +828,6 @@ export default function SikaNewPage() {
 
         </div>
 
-        {/* ===== Action buttons ===== */}
         <div className="flex justify-end gap-3 py-2">
           <button
             onClick={() => router.push('/dashboard/pemohon/program/new')}
@@ -882,7 +850,6 @@ export default function SikaNewPage() {
         </div>
       </div>
 
-     {/* ===== Modal: Sertifikat & Sifat Pekerjaan ===== */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl w-180 max-w-[95vw] overflow-hidden">

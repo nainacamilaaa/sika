@@ -14,8 +14,6 @@ export interface AppNotification {
 
 const MAX_HARI_REVALIDASI = 7;
 
-// Sama seperti di monitoring page: berlakuHingga adalah 6 digit [D,D,M,M,Y,Y],
-// bukan tanggal utuh — digabung dulu jadi ISO date yang valid.
 function digitsToDateString(digits?: string[]): string | null {
   if (!digits || digits.length !== 6 || digits.some((d) => !d)) return null;
   const [d1, d2, m1, m2, y1, y2] = digits;

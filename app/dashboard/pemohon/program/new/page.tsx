@@ -39,7 +39,13 @@ export default function EntryProgramPage() {
     if (!form.noKontrak.trim()) newErrors.noKontrak = 'No. kontrak wajib diisi';
     if (!form.tanggalKontrak) newErrors.tanggalKontrak = 'Tanggal kontrak wajib diisi';
     if (!form.satKerjaPemberi) newErrors.satKerjaPemberi = 'Fungsi penanggung jawab pekerjaan wajib dipilih';
+    if (!form.pelaksanaJenis) newErrors.pelaksanaJenis = 'Jenis pelaksana wajib dipilih';
     if (!form.pelaksanaPerusahaan) newErrors.pelaksanaPerusahaan = 'Perusahaan pelaksana wajib dipilih';
+    if (!form.picPemberiList[0]?.trim()) newErrors.picPemberiList = 'PA wajib dipilih';
+    if (!form.pimpinanPelaksanaList[0]?.trim()) newErrors.pimpinanPelaksanaList = 'Pimpinan pelaksana pekerjaan wajib dipilih';
+    if (!form.satKerjaPenanggung) newErrors.satKerjaPenanggung = 'Fungsi penanggung jawab aset wajib dipilih';
+    if (!form.fungsiIA) newErrors.fungsiIA = 'Fungsi IA wajib dipilih';
+    if (!form.picPenanggungList[0]?.trim()) newErrors.picPenanggungList = 'PIC IA wajib dipilih';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -117,7 +123,11 @@ export default function EntryProgramPage() {
               updated[idx] = e.target.value;
               handleChange(listKey, updated);
             }}
-            className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+            className={`flex-1 border rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 bg-white ${
+              idx === 0 && errors[listKey]
+                ? 'border-red-400 focus:ring-red-400'
+                : 'border-gray-300 focus:ring-blue-400'
+            }`}
           >
             <option value="">-- Pilih --</option>
             {opsiPIC.map((o) => (
@@ -146,6 +156,9 @@ export default function EntryProgramPage() {
           )}
         </div>
       ))}
+      {errors[listKey] && (
+        <p className="text-red-500 text-xs">{errors[listKey]}</p>
+      )}
     </div>
   );
 
@@ -160,10 +173,8 @@ export default function EntryProgramPage() {
     <div className="min-h-screen bg-gray-100">
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
-          <img src="/logosika.svg" alt="SIKA" className="h-8 object-contain" />
-          <div className="w-px h-10 bg-gray-200" />
-          <div className="flex flex-col leading-tight">
-            <span className="text-sm font-bold text-gray-800">Entry Data</span>
+          <div className="flex flex-col leading-tight border-l-4 border-blue-600 pl-3">
+            <span className="text-sm font-bold text-gray-800 tracking-tight">Entry Data</span>
             <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
               Formulir Pengajuan
             </span>
@@ -330,7 +341,11 @@ export default function EntryProgramPage() {
                   <select
                     value={form.pelaksanaJenis}
                     onChange={(e) => handleChange('pelaksanaJenis', e.target.value)}
-                    className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                    className={`flex-1 border rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 bg-white ${
+                      errors.pelaksanaJenis
+                        ? 'border-red-400 focus:ring-red-400'
+                        : 'border-gray-300 focus:ring-blue-400'
+                    }`}
                   >
                     <option value="">-- Jenis --</option>
                     {opsiPelaksana.map((o) => <option key={o}>{o}</option>)}
@@ -348,15 +363,17 @@ export default function EntryProgramPage() {
                     {opsiPerusahaan.map((o) => <option key={o}>{o}</option>)}
                   </select>
                 </div>
-                {errors.pelaksanaPerusahaan && (
-                  <p className="text-red-500 text-xs mt-1">{errors.pelaksanaPerusahaan}</p>
+                {(errors.pelaksanaJenis || errors.pelaksanaPerusahaan) && (
+                  <p className="text-red-500 text-xs mt-1">
+                    {errors.pelaksanaJenis || errors.pelaksanaPerusahaan}
+                  </p>
                 )}
               </div>
             </div>
 
             <div className="flex items-start gap-4">
               <label className="w-64 text-sm text-gray-700 shrink-0 font-medium pt-2">
-                PA (Pelaksana Pekerjaan/Performing Authority)
+                PA (Pelaksana Pekerjaan/Performing Authority) <span className="text-red-500">*</span>
               </label>
               <span className="text-gray-400 shrink-0 pt-2">:</span>
               {renderPICRows('picPemberiList', form.picPemberiList)}
@@ -364,45 +381,55 @@ export default function EntryProgramPage() {
 
             <div className="flex items-start gap-4">
               <label className="w-64 text-sm text-gray-700 shrink-0 font-medium pt-2">
-                Pimpinan Pelaksana Pekerjaan (PPA)
+                Pimpinan Pelaksana Pekerjaan (PPA) <span className="text-red-500">*</span>
               </label>
               <span className="text-gray-400 shrink-0 pt-2">:</span>
               {renderPICRows('pimpinanPelaksanaList', form.pimpinanPelaksanaList)}
             </div>
 
-            <div className="flex items-center gap-4">
-              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
-                Fungsi (Penanggung Jawab Aset)
+            <div className="flex items-start gap-4">
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium pt-2">
+                Fungsi (Penanggung Jawab Aset) <span className="text-red-500">*</span>
               </label>
-              <span className="text-gray-400 shrink-0">:</span>
-              <select
-                value={form.satKerjaPenanggung}
-                onChange={(e) => handleChange('satKerjaPenanggung', e.target.value)}
-                className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
-              >
-                <option value="">-- Pilih --</option>
-                {opsiFungsi.map((o) => <option key={o}>{o}</option>)}
-              </select>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium">
-                Fungsi IA (Pemberi Izin Aset/Asset Holder/Issuing Authority)
-              </label>
-              <span className="text-gray-400 shrink-0">:</span>
-              <select
-                value={form.fungsiIA}
-                onChange={(e) => handleChange('fungsiIA', e.target.value)}
-                className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
-              >
-                <option value="">-- Pilih --</option>
-                {opsiFungsiIA.map((o) => <option key={o}>{o}</option>)}
-              </select>
+              <span className="text-gray-400 shrink-0 pt-2">:</span>
+              <div className="flex-1">
+                <select
+                  value={form.satKerjaPenanggung}
+                  onChange={(e) => handleChange('satKerjaPenanggung', e.target.value)}
+                  className={fieldClass('satKerjaPenanggung')}
+                >
+                  <option value="">-- Pilih --</option>
+                  {opsiFungsi.map((o) => <option key={o}>{o}</option>)}
+                </select>
+                {errors.satKerjaPenanggung && (
+                  <p className="text-red-500 text-xs mt-1">{errors.satKerjaPenanggung}</p>
+                )}
+              </div>
             </div>
 
             <div className="flex items-start gap-4">
               <label className="w-64 text-sm text-gray-700 shrink-0 font-medium pt-2">
-                PIC IA (Pemberi Izin Aset/Asset Holder/Issuing Authority)
+                Fungsi IA (Pemberi Izin Aset/Asset Holder/Issuing Authority) <span className="text-red-500">*</span>
+              </label>
+              <span className="text-gray-400 shrink-0 pt-2">:</span>
+              <div className="flex-1">
+                <select
+                  value={form.fungsiIA}
+                  onChange={(e) => handleChange('fungsiIA', e.target.value)}
+                  className={fieldClass('fungsiIA')}
+                >
+                  <option value="">-- Pilih --</option>
+                  {opsiFungsiIA.map((o) => <option key={o}>{o}</option>)}
+                </select>
+                {errors.fungsiIA && (
+                  <p className="text-red-500 text-xs mt-1">{errors.fungsiIA}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-start gap-4">
+              <label className="w-64 text-sm text-gray-700 shrink-0 font-medium pt-2">
+                PIC IA (Pemberi Izin Aset/Asset Holder/Issuing Authority) <span className="text-red-500">*</span>
               </label>
               <span className="text-gray-400 shrink-0 pt-2">:</span>
               {renderPICRows('picPenanggungList', form.picPenanggungList)}

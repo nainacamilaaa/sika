@@ -355,7 +355,7 @@ export default function PemohonLayout({ children }: { children: React.ReactNode 
       <button
         onClick={() => setSidebarOpen(true)}
         style={{
-          position: 'fixed', top: 18, left: 16, zIndex: 30,
+          position: 'fixed', top: 14, left: 16, zIndex: 30,
           background: '#ffffff', border: '1px solid #e5e7eb', cursor: 'pointer',
           padding: '8px', borderRadius: 9, color: '#475569',
           display: sidebarOpen ? 'none' : 'flex', alignItems: 'center',

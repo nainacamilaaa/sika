@@ -59,15 +59,11 @@ export default function LoginPage() {
       >
         <div className="flex-1 flex flex-col justify-between p-10 min-w-0">
           <div className="mb-4 flex items-center justify-between">
-            <img
-              src="/logosika.svg"
-              alt="SIKA"
-              className="h-12 object-contain"
-            />
+
             <img
               src="/logopertaminagasfull.svg"
               alt="Pertamina Gas"
-              className="h-10 object-contain"
+              className="h-8 object-contain"
             />
           </div>
 
@@ -75,8 +71,8 @@ export default function LoginPage() {
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
               Selamat Datang di <span className="text-blue-600">SIKA!</span>
             </h1>
-            <p className="text-gray-500 text-sm mb-8 leading-relaxed">
-              Sistem digital untuk pengelolaan JSA, SIKA, validasi pekerjaan,
+            <p className="text-gray-500 text-sm mb-5 leading-relaxed">
+              Sistem digital untuk pengelolaan SIKA, JSA, Revalidasi pekerjaan,
               dan monitoring aktivitas kerja secara terintegrasi
             </p>
 
@@ -137,7 +133,7 @@ export default function LoginPage() {
           </div>
 
           <div className="mt-8 flex items-center justify-between text-xs text-gray-400">
-            <span>HSSE | Perusahaan Gas Negara</span>
+            <span>HSSE | Pertamina Gas</span>
             <span>© 2026</span>
           </div>
         </div>

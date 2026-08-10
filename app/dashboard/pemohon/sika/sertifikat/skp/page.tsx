@@ -466,11 +466,9 @@ export default function SKPPage() {
 
       {/* TOP NAVBAR */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
-        <div className="flex items-center gap-3" style={{ paddingLeft: '30px' }}>
-          <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
-          <div className="w-px h-10 bg-gray-200" />
-          <div className="flex flex-col leading-tight">
-            <span className="text-sm font-bold text-gray-800">Entry Data</span>
+        <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
+          <div className="flex flex-col leading-tight border-l-4 border-blue-600 pl-3">
+            <span className="text-sm font-bold text-gray-800 tracking-tight">Entry Data</span>
             <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
               Sertifikat Kerja Panas
             </span>
@@ -479,8 +477,7 @@ export default function SKPPage() {
       </div>
 
       <div className="px-6 py-6 space-y-4">
-
-        {/* SATU BORDER — Rujukan/Hero s/d Bagian 5 dalam 1 container */}
+        
         <div className="bg-white rounded border-2 border-white shadow-lg overflow-hidden">
 
           {/* HERO HEADER */}
@@ -710,7 +707,6 @@ export default function SKPPage() {
                         setGasMonitoring('ya');
                       } else {
                         setGasMonitoring('tidak');
-                        // Reset form gas kalau pilih tidak
                         setGasRows([emptyGasRow()]);
                         setDiukurOleh('');
                       }
@@ -790,7 +786,7 @@ export default function SKPPage() {
             </div>
           </div>
 
-        </div>{/* akhir 1 border wrapper */}
+        </div>
 
         {/* FOOTER BUTTONS */}
         <div className="flex justify-end gap-3 py-2 pb-8">

@@ -5,7 +5,7 @@ import { useState, useMemo } from 'react';
 import {
   ChevronLeft, ChevronRight, FileText, Search, Filter,
   CheckCircle, XCircle, Clock, AlertCircle, ClipboardCheck, Loader2,
-  History, ListFilter, Calendar, CalendarDays, ChevronDown,
+  History, Calendar, CalendarDays, ChevronDown,
   RefreshCcw, X, ArrowUpDown,
 } from 'lucide-react';
 import { useProgramStore, getNomorSika } from '@/store/programStore';
@@ -56,6 +56,28 @@ const getPemberiStatus = (sikaSt: ApprovalStatus, jsaSt: ApprovalStatus): Approv
   if (sikaSt === 'approved' || jsaSt === 'approved') return 'waiting';
   if (sikaSt === 'request' || jsaSt === 'request') return 'request';
   return 'draft';
+};
+
+// Selisih hari dari hari ini ke tanggal berakhir SIKA. Negatif = sudah lewat.
+// null = tidak ada tanggal berlaku yang valid untuk dihitung.
+// Dipakai oleh filter "Masa Berlaku SIKA" — jauh lebih relevan untuk Pemberi
+// Kerja daripada filter status (yang sudah tercakup lewat tab Semua/Pending)
+// karena ini membantu menangkap SIKA yang mau/sudah kedaluwarsa sebelum jadi masalah.
+const getDaysUntilExpiry = (tanggalBerakhirSIKA: string): number | null => {
+  if (!tanggalBerakhirSIKA || tanggalBerakhirSIKA === '-' || isNaN(new Date(tanggalBerakhirSIKA).getTime())) {
+    return null;
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(tanggalBerakhirSIKA);
+  target.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / 86400000);
+};
+
+const MASA_BERLAKU_LABEL: Record<string, string> = {
+  kedaluwarsa: 'Sudah Kedaluwarsa',
+  '7hari': '≤ 7 Hari Lagi',
+  '30hari': '≤ 30 Hari Lagi',
 };
 
 const OPSI_LOKASI = [
@@ -905,9 +927,8 @@ export default function PemberiApprovalManagementPage() {
   const { user } = useAuthStore();
 
   const [search, setSearch] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
+  const [filterMasaBerlaku, setFilterMasaBerlaku] = useState('');
   const [filterLokasi, setFilterLokasi] = useState('');
-  const [filterPelaksana, setFilterPelaksana] = useState('');
   const [filterSifat, setFilterSifat] = useState('');
   const [filterRevalidasi, setFilterRevalidasi] = useState('');
   const [filterTglDari, setFilterTglDari] = useState('');
@@ -916,7 +937,6 @@ export default function PemberiApprovalManagementPage() {
   const [showFilter, setShowFilter] = useState(false);
   const [revalidasiModalRowId, setRevalidasiModalRowId] = useState<string | null>(null);
   const [riwayatModalRowId, setRiwayatModalRowId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'semua' | 'pending'>('semua');
 
   // Satu baris per submission yang sudah di-"Request Review" oleh pemohon
   // (submitToPemberi di store) — bisa banyak baris, bukan cuma satu.
@@ -952,21 +972,21 @@ export default function PemberiApprovalManagementPage() {
     });
   }, [submissions]);
 
-  const allPelaksana = useMemo(
-    () => [...new Set(rows.map((r) => r.pelaksana).filter((p) => p && p !== '-'))],
-    [rows]
-  );
-
   const filtered = rows.filter((r) => {
-    const overall = getPemberiStatus(r.sikaStatus, r.jsaStatus);
-    const matchTab = activeTab === 'semua' || overall === 'request' || overall === 'waiting';
     const matchCari = !search ||
       r.namaProgram.toLowerCase().includes(search.toLowerCase()) ||
       r.noJSA.toLowerCase().includes(search.toLowerCase()) ||
       r.noSIKA.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = !filterStatus || overall === filterStatus;
+    const matchMasaBerlaku = (() => {
+      if (!filterMasaBerlaku) return true;
+      const days = getDaysUntilExpiry(r.tanggalBerakhirSIKA);
+      if (days === null) return false;
+      if (filterMasaBerlaku === 'kedaluwarsa') return days < 0;
+      if (filterMasaBerlaku === '7hari') return days >= 0 && days <= 7;
+      if (filterMasaBerlaku === '30hari') return days >= 0 && days <= 30;
+      return true;
+    })();
     const matchLokasi = !filterLokasi || r.lokasi === filterLokasi;
-    const matchPelaksana = !filterPelaksana || r.pelaksana === filterPelaksana;
     const matchSifat = !filterSifat || r.sifatPekerjaan === filterSifat;
     const matchRevalidasi = !filterRevalidasi || r.perubahanStatus === filterRevalidasi;
     const matchTanggal = (() => {
@@ -981,7 +1001,7 @@ export default function PemberiApprovalManagementPage() {
       }
       return true;
     })();
-    return matchTab && matchCari && matchStatus && matchLokasi && matchPelaksana && matchSifat && matchRevalidasi && matchTanggal;
+    return matchCari && matchMasaBerlaku && matchLokasi && matchSifat && matchRevalidasi && matchTanggal;
   });
 
   const sorted = [...filtered].sort((a, b) => {
@@ -1011,12 +1031,11 @@ export default function PemberiApprovalManagementPage() {
   const revalidasiModalRow = revalidasiModalRowId ? rows.find((r) => r.id === revalidasiModalRowId) : undefined;
   const riwayatModalRow = riwayatModalRowId ? rows.find((r) => r.id === riwayatModalRowId) : undefined;
 
-  const hasActiveFilter = !!(filterStatus || filterLokasi || filterPelaksana || filterSifat || filterRevalidasi || filterTglDari || filterTglSampai);
+  const hasActiveFilter = !!(filterMasaBerlaku || filterLokasi || filterSifat || filterRevalidasi || filterTglDari || filterTglSampai);
 
   const resetAllFilters = () => {
-    setFilterStatus('');
+    setFilterMasaBerlaku('');
     setFilterLokasi('');
-    setFilterPelaksana('');
     setFilterSifat('');
     setFilterRevalidasi('');
     setFilterTglDari('');
@@ -1114,35 +1133,6 @@ export default function PemberiApprovalManagementPage() {
             </div>
           </div>
 
-          {/* Tab: Semua / Pending */}
-          <div className="px-6 pt-3 border-b border-gray-100 flex items-center gap-1">
-            {([
-              { key: 'semua', label: 'Semua Pengajuan', count: rows.length },
-              { key: 'pending', label: 'Pending / Perlu Review', count: countByOverall('pending') },
-            ] as const).map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setActiveTab(t.key)}
-                className={`relative flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-t-lg transition ${
-                  activeTab === t.key
-                    ? 'text-blue-700 bg-blue-50 border border-b-0 border-gray-200'
-                    : 'text-gray-400 hover:text-gray-600'
-                }`}
-                style={activeTab === t.key ? { marginBottom: '-1px' } : undefined}
-              >
-                {t.key === 'pending' && <ListFilter size={12} />}
-                {t.label}
-                <span
-                  className={`text-[10px] rounded-full px-1.5 py-0.5 ${
-                    activeTab === t.key ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'
-                  }`}
-                >
-                  {t.count}
-                </span>
-              </button>
-            ))}
-          </div>
-
           <div className="px-6 py-3 border-b border-gray-100 flex flex-wrap gap-3 items-center">
             <div className="relative flex-1 min-w-52">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -1174,17 +1164,22 @@ export default function PemberiApprovalManagementPage() {
           {showFilter && (
             <div className="px-6 py-3 border-b border-gray-100 bg-blue-50/40 flex flex-wrap gap-3 items-end">
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] text-gray-500 font-medium uppercase tracking-wide">Status Keseluruhan</label>
+                <label className="text-[10px] text-gray-500 font-medium uppercase tracking-wide">Masa Berlaku SIKA</label>
                 <select
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value)}
-                  className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-blue-300 w-48"
+                  value={filterMasaBerlaku}
+                  onChange={(e) => setFilterMasaBerlaku(e.target.value)}
+                  className={`border rounded-lg px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-300 w-48 ${
+                    filterMasaBerlaku === 'kedaluwarsa'
+                      ? 'border-red-200 text-red-600 font-semibold'
+                      : filterMasaBerlaku === '7hari'
+                      ? 'border-amber-200 text-amber-700 font-semibold'
+                      : 'border-gray-200 text-gray-600'
+                  }`}
                 >
-                  <option value="">Semua Status</option>
-                  <option value="request">Perlu Review</option>
-                  <option value="waiting">Menunggu</option>
-                  <option value="approved">Disetujui</option>
-                  <option value="rejected">Ditolak</option>
+                  <option value="">Semua Masa Berlaku</option>
+                  <option value="kedaluwarsa">⚠ Sudah Kedaluwarsa</option>
+                  <option value="7hari">≤ 7 Hari Lagi</option>
+                  <option value="30hari">≤ 30 Hari Lagi</option>
                 </select>
               </div>
               <div className="flex flex-col gap-1">
@@ -1196,17 +1191,6 @@ export default function PemberiApprovalManagementPage() {
                 >
                   <option value="">Semua Area</option>
                   {OPSI_LOKASI.map((l) => <option key={l} value={l}>{l}</option>)}
-                </select>
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] text-gray-500 font-medium uppercase tracking-wide">Pelaksana / Kontraktor</label>
-                <select
-                  value={filterPelaksana}
-                  onChange={(e) => setFilterPelaksana(e.target.value)}
-                  className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-blue-300 w-56"
-                >
-                  <option value="">Semua Pelaksana</option>
-                  {allPelaksana.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
               <div className="flex flex-col gap-1">
@@ -1264,11 +1248,15 @@ export default function PemberiApprovalManagementPage() {
           {hasActiveFilter && (
             <div className="px-6 py-2.5 border-b border-gray-100 bg-gray-50/60 flex flex-wrap gap-2 items-center">
               <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide shrink-0">Filter aktif:</span>
-              {filterStatus && (
-                <FilterChip label={`Status: ${STATUS_BADGE[filterStatus as ApprovalStatus]?.label ?? filterStatus}`} onRemove={() => setFilterStatus('')} />
+              {filterMasaBerlaku && (
+                <FilterChip
+                  label={`Masa Berlaku: ${MASA_BERLAKU_LABEL[filterMasaBerlaku] ?? filterMasaBerlaku}`}
+                  onRemove={() => setFilterMasaBerlaku('')}
+                />
               )}
-              {filterLokasi && <FilterChip label={`Lokasi: ${filterLokasi}`} onRemove={() => setFilterLokasi('')} />}
-              {filterPelaksana && <FilterChip label={`Pelaksana: ${filterPelaksana}`} onRemove={() => setFilterPelaksana('')} />}
+              {filterLokasi && (
+                <FilterChip label={`Area: ${filterLokasi}`} onRemove={() => setFilterLokasi('')} />
+              )}
               {filterSifat && <FilterChip label={`Sifat: ${filterSifat}`} onRemove={() => setFilterSifat('')} />}
               {filterRevalidasi && (
                 <FilterChip
@@ -1314,9 +1302,7 @@ export default function PemberiApprovalManagementPage() {
                     {sorted.length === 0 ? (
                       <tr>
                         <td colSpan={11} className="text-center text-gray-400 py-14 text-sm">
-                          {activeTab === 'pending'
-                            ? 'Tidak ada pengajuan pending saat ini.'
-                            : 'Tidak ada data yang sesuai filter.'}
+                          Tidak ada data yang sesuai filter.
                         </td>
                       </tr>
                     ) : sorted.map((row, i) => {
