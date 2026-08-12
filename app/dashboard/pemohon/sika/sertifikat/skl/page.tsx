@@ -6,6 +6,7 @@ import { useProgramStore } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
 import { Users, Lock, CheckCircle, Paperclip, X, FileText, Eraser, Plus, Trash2 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
+import { buildChecklist } from '@/lib/sertifikatUtils';
 
 const isolasiItems = [
   'Pemutus ditarik keluar / Racking out / down breaker',
@@ -406,8 +407,10 @@ type CheckVal = 'yes' | 'no' | 'na' | null;
 
 export default function SKLPage() {
   const router = useRouter();
-  const { sika, markSertifikatFilled } = useProgramStore();
+  const { sika, markSertifikatFilled, setSertifikatData } = useProgramStore();
   const { user } = useAuthStore();
+
+  const NAMA = 'Sertifikat Kerja Isolasi Listrik (SKL)';
 
   const canEditPA = user?.role === 'pemberi';
   const canEditIA = user?.role === 'pja';
@@ -507,8 +510,50 @@ export default function SKLPage() {
     });
   };
 
+  // Menyusun seluruh data isian SKL menjadi satu objek — mengikuti pola
+  // yang sama dengan buildData() di sika/sertifikat/skp & skd/page.tsx —
+  // supaya Detail Program bisa menampilkan data ini via sertifikatData.
+  // Nilai 'na' pada checklist tidak dikenal oleh buildChecklist (hanya
+  // yes/no/null), jadi dipetakan dulu ke null supaya tidak salah baca,
+  // catatan N/A tetap tersimpan di `lainnya.naIndexes` untuk referensi.
+  const buildData = () => ({
+    tanggalTerbit,
+    jamMulai,
+    jamSelesai,
+    berlakuHingga,
+    checklist: buildChecklist(
+      isolasiItems,
+      Object.fromEntries(
+        Object.entries(checklist).map(([k, v]) => [k, v === 'na' ? null : v])
+      ) as Record<number, 'yes' | 'no' | null>
+    ),
+    checklistDocs: Object.fromEntries(
+      Object.entries(checklistDocs).map(([key, doc]) => [
+        key,
+        doc ? { name: doc.file.name, size: doc.file.size, type: doc.file.type } : null,
+      ])
+    ),
+    verifikasi,
+    gasMonitoring,
+    gasRows,
+    diukurOleh,
+    lainnya: {
+      diisiOlehIA,
+      jenisPengisolasian,
+      dimintaNama,
+      dimintaWaktu,
+      dimintaLokasi,
+      nomorKunci,
+      naIndexes: Object.entries(checklist).filter(([, v]) => v === 'na').map(([k]) => Number(k)),
+      pjIsolasiTanggal,
+      pjIsolasiNama,
+      pjIsolasiSignature,
+    },
+  });
+
   const handleSimpan = () => {
-    markSertifikatFilled('Sertifikat Kerja Isolasi Listrik (SKL)');
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
     setShowSuccess(true);
     setTimeout(() => {
       router.push('/dashboard/pemohon/sika/new');
@@ -516,7 +561,8 @@ export default function SKLPage() {
   };
 
   const handleSaveAndClose = () => {
-    markSertifikatFilled('Sertifikat Kerja Isolasi Listrik (SKL)');
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
     router.push('/dashboard/pemohon/sika/new');
   };
 

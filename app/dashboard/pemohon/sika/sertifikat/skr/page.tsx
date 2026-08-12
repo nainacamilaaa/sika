@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useProgramStore } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
 import { Users, Lock, CheckCircle, Plus, Trash2 } from 'lucide-react';
+import { buildChecklist } from '@/lib/sertifikatUtils';
 
 const kondisiItems = [
   'Sertifikat Izin Bekerja Radiografi masih berlaku',
@@ -267,8 +268,10 @@ const allItems = [...kondisiItems, ...pencegahanItems];
 
 export default function SKRPage() {
   const router = useRouter();
-  const { sika, markSertifikatFilled } = useProgramStore();
+  const { sika, markSertifikatFilled, setSertifikatData } = useProgramStore();
   const { user } = useAuthStore();
+
+  const NAMA = 'Sertifikat Kerja Radiografi (SKR)';
 
   const canEditPA = user?.role === 'pemberi';
   const canEditIA = user?.role === 'pja';
@@ -324,8 +327,35 @@ export default function SKRPage() {
 
   const sudahIsiGas = gasRows.some(r => r.time || r.lel || r.o2 || r.h2s || r.co2 || r.co || r.temp || r.sign || r.remark);
 
+  // Menyusun seluruh data isian SKR menjadi satu objek — mengikuti pola
+  // yang sama dengan buildData() di sika/sertifikat/skp & skd/page.tsx —
+  // supaya Detail Program bisa menampilkan data ini via sertifikatData.
+  const buildData = () => ({
+    tanggalTerbit,
+    jamMulai,
+    jamSelesai,
+    berlakuHingga,
+    checklist: buildChecklist(allItems, checklist),
+    checklistDocs: {},
+    verifikasi,
+    gasMonitoring,
+    gasRows,
+    diukurOleh,
+    lainnya: {
+      diisiOlehIA,
+      pengawasPelaksana,
+      petugasProteksi,
+      ahliRadiografi,
+      jenisSumber,
+      kondisiMax,
+      aktivitas,
+      tindakanLainnya,
+    },
+  });
+
   const handleSimpan = () => {
-    markSertifikatFilled('Sertifikat Kerja Radiografi (SKR)');
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
     setShowSuccess(true);
     setTimeout(() => {
       router.push('/dashboard/pemohon/sika/new');
@@ -333,7 +363,8 @@ export default function SKRPage() {
   };
 
   const handleSaveAndClose = () => {
-    markSertifikatFilled('Sertifikat Kerja Radiografi (SKR)');
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
     router.push('/dashboard/pemohon/sika/new');
   };
 

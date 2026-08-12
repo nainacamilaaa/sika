@@ -237,8 +237,10 @@ function FormKondisiGas({
 
 export default function SKAPage() {
   const router = useRouter();
-  const { sika, markSertifikatFilled } = useProgramStore();
+  const { sika, markSertifikatFilled, setSertifikatData } = useProgramStore();
   const { user } = useAuthStore();
+
+  const NAMA = 'Sertifikat Kerja Pengangkatan (SKA)';
 
   const canEditPA = user?.role === 'pemberi';
   const canEditIA = user?.role === 'pja';
@@ -320,8 +322,43 @@ export default function SKAPage() {
 
   const sudahIsiGas = gasRows.some(r => r.time || r.lel || r.o2 || r.h2s || r.co2 || r.co || r.temp || r.sign || r.remark);
 
+  // Menyusun seluruh data isian SKA menjadi satu objek — mengikuti pola
+  // yang sama dengan buildData() di sika/sertifikat/skp & skd/page.tsx —
+  // supaya Detail Program bisa menampilkan data ini via sertifikatData.
+  // SKA tidak punya daftar checklist yes/no seperti sertifikat lain
+  // (formatnya murni field bebas per baris), jadi `checklist` dikirim
+  // kosong — Bagian 3 di Detail Program akan menampilkan "Belum diisi"
+  // untuk tabel checklist umum, sementara seluruh isian SKA yang
+  // sesungguhnya tersimpan di `lainnya` supaya tidak ada data yang hilang.
+  const buildData = () => ({
+    tanggalTerbit,
+    jamMulai,
+    jamSelesai,
+    berlakuHingga,
+    checklist: [],
+    checklistDocs: {},
+    verifikasi,
+    gasMonitoring,
+    gasRows,
+    diukurOleh,
+    lainnya: {
+      dataBeban: {
+        jenisDerrick, namaOpera, jenisBenda, beratKotor, beratTon, tanahStabil, tindakanDiamt,
+        kegiatanLingkungan, keberadaanJalur, jalurPipa, jarakLebih15m, safetyBriefing,
+        preJobMeeting, tindakanPencegahan, tindakanLain, riggingPlan,
+      },
+      dataOperasiDerek: {
+        prosedurSesuai, stabilizer, ujiBeban, signalRigor, signalRigorNama,
+        komunikasiAlat, caraAngkat, jenisBeban, jenisBebanCara, jenisDataran,
+        kondisiPermukaan, bahanPermukaan, penguatTumpuan, penguatLain,
+      },
+      dokumenSertifikat: { dokumen, sertifikat, tindakanLainDokumen },
+    },
+  });
+
   const handleSimpan = () => {
-    markSertifikatFilled('Sertifikat Kerja Pengangkatan (SKA)');
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
     setShowSuccess(true);
     setTimeout(() => {
       router.push('/dashboard/pemohon/sika/new');
@@ -329,7 +366,8 @@ export default function SKAPage() {
   };
 
   const handleSaveAndClose = () => {
-    markSertifikatFilled('Sertifikat Kerja Pengangkatan (SKA)');
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
     router.push('/dashboard/pemohon/sika/new');
   };
 

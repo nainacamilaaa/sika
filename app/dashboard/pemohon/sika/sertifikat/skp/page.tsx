@@ -367,6 +367,7 @@ export default function SKPPage() {
   const [docErrors, setDocErrors] = useState<Record<number, string | null>>({});
 
   const [diisiOlehIA, setDiisiOlehIA] = useState(false);
+  const [rujukanSikaNo, setRujukanSikaNo] = useState('');
   const [tanggalTerbit, setTanggalTerbit] = useState('');
   const [jamMulai, setJamMulai] = useState('');
   const [jamSelesai, setJamSelesai] = useState('');
@@ -431,6 +432,7 @@ export default function SKPPage() {
   const sudahIsiGas = gasRows.some(r => r.time || r.lel || r.o2 || r.h2s || r.co2 || r.co || r.temp || r.sign || r.remark);
 
   const buildData = () => ({
+    rujukanSikaNo,
     tanggalTerbit,
     jamMulai,
     jamSelesai,
@@ -489,6 +491,8 @@ export default function SKPPage() {
               <span className="text-sm font-semibold text-gray-700 whitespace-nowrap">Rujukan SIKA No.</span>
               <input
                 type="text"
+                value={rujukanSikaNo}
+                onChange={(e) => setRujukanSikaNo(e.target.value)}
                 placeholder="..."
                 className="border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-700 w-44 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition"
               />

@@ -6,6 +6,7 @@ import { useProgramStore } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
 import { Users, Lock, CheckCircle, Paperclip, X, FileText, Eraser, Plus, Trash2 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
+import { buildChecklist } from '@/lib/sertifikatUtils';
 
 const kondisiItems = [
   'Peralatan secara fisik diisolasi dari semua sumber bahaya',
@@ -430,8 +431,10 @@ const allItems = [...kondisiItems, ...pencegahanItems];
 
 export default function SKRTPage() {
   const router = useRouter();
-  const { sika, markSertifikatFilled } = useProgramStore();
+  const { sika, markSertifikatFilled, setSertifikatData } = useProgramStore();
   const { user } = useAuthStore();
+
+  const NAMA = 'Sertifikat Kerja Ruang Terbatas (SKRT)';
 
   const canEditPA = user?.role === 'pemberi';
   const canEditIA = user?.role === 'pja';
@@ -523,8 +526,37 @@ export default function SKRTPage() {
 
   const sudahIsiGas = gasRows.some(r => r.time || r.lel || r.o2 || r.h2s || r.co2 || r.co || r.temp || r.sign || r.remark);
 
+  // Menyusun seluruh data isian SKRT menjadi satu objek — mengikuti pola
+  // yang sama dengan buildData() di sika/sertifikat/skp & skd/page.tsx —
+  // supaya Detail Program bisa menampilkan data ini via sertifikatData.
+  const buildData = () => ({
+    tanggalTerbit,
+    jamMulai,
+    jamSelesai,
+    berlakuHingga,
+    checklist: buildChecklist(allItems, checklist),
+    checklistDocs: Object.fromEntries(
+      Object.entries(checklistDocs).map(([key, doc]) => [
+        key,
+        doc ? { name: doc.file.name, size: doc.file.size, type: doc.file.type } : null,
+      ])
+    ),
+    verifikasi,
+    gasMonitoring,
+    gasRows,
+    diukurOleh,
+    lainnya: {
+      diisiOlehIA,
+      gasTesterNama,
+      gasTesterNoSertif,
+      gasTesterSignature,
+      pengetesanAwal: { o2: gasO2, explosive: gasExplosive, co2: gasCO2, co: gasCO, h2s: gasH2S, lainnya: gasLainnya },
+    },
+  });
+
   const handleSimpan = () => {
-    markSertifikatFilled('Sertifikat Kerja Ruang Terbatas (SKRT)');
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
     setShowSuccess(true);
     setTimeout(() => {
       router.push('/dashboard/pemohon/sika/new');
@@ -532,7 +564,8 @@ export default function SKRTPage() {
   };
 
   const handleSaveAndClose = () => {
-    markSertifikatFilled('Sertifikat Kerja Ruang Terbatas (SKRT)');
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
     router.push('/dashboard/pemohon/sika/new');
   };
 

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useProgramStore } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
 import { Lock, CheckCircle, Paperclip, X, FileText, Plus, Trash2 } from 'lucide-react';
+import { buildChecklist } from '@/lib/sertifikatUtils';
 
 const checklistItems = [
   'Apakah pelaksana pengambil foto/video sudah diberi penjelasan mengenai kondisi dan bahaya penggunaan camera di daerah terbatas',
@@ -325,8 +326,10 @@ type CheckVal = 'yes' | 'no' | null;
 
 export default function SKPFPage() {
   const router = useRouter();
-  const { sika, markSertifikatFilled } = useProgramStore();
+  const { sika, markSertifikatFilled, setSertifikatData } = useProgramStore();
   const { user } = useAuthStore();
+
+  const NAMA = 'Sertifikat Kerja Pengambilan Fotografi (SKPF)';
 
   const canEditPA = user?.role === 'pemberi';
   const canEditIA = user?.role === 'pja';
@@ -429,8 +432,46 @@ export default function SKPFPage() {
   const totalFilled = yesCount + noCount;
   const totalDocs   = Object.values(checklistDocs).filter(Boolean).length;
 
+  // Menyusun seluruh data isian SKPF menjadi satu objek — mengikuti pola
+  // yang sama dengan buildData() di sika/sertifikat/skp & skd/page.tsx —
+  // supaya Detail Program bisa menampilkan data ini via sertifikatData.
+  const buildData = () => ({
+    tanggalTerbit,
+    jamMulai,
+    jamSelesai,
+    berlakuHingga,
+    checklist: buildChecklist(checklistItems, checklist),
+    checklistDocs: Object.fromEntries(
+      Object.entries(checklistDocs).map(([key, doc]) => [
+        key,
+        doc ? { name: doc.file.name, size: doc.file.size, type: doc.file.type } : null,
+      ])
+    ),
+    verifikasi,
+    gasMonitoring,
+    gasRows,
+    diukurOleh,
+    lainnya: {
+      diisiOlehIA,
+      tindakanLainnya,
+      pemohonType,
+      jenisFotoUmum,
+      jenisFotoSpesifik,
+      spesifikInstalasi,
+      tujuanPengambilan,
+      peralatanFoto: jenisFotoOptions
+        .filter((item) => selectedFoto[item])
+        .map((item) => ({
+          item,
+          typeMerek: typeMerek[item] || '',
+          dilengkapiBlitz: dilengkapiBlitz[item] || null,
+        })),
+    },
+  });
+
   const handleSimpan = () => {
-    markSertifikatFilled('Sertifikat Kerja Pengambilan Fotografi (SKPF)');
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
     setShowSuccess(true);
     setTimeout(() => {
       router.push('/dashboard/pemohon/sika/new');
@@ -438,7 +479,8 @@ export default function SKPFPage() {
   };
 
   const handleSaveAndClose = () => {
-    markSertifikatFilled('Sertifikat Kerja Pengambilan Fotografi (SKPF)');
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
     router.push('/dashboard/pemohon/sika/new');
   };
 

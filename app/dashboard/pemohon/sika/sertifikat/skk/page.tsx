@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useProgramStore } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
 import { Users, Lock, CheckCircle, Plus, Trash2 } from 'lucide-react';
+import { buildChecklist } from '@/lib/sertifikatUtils';
 
 const checklistItemsPA = [
   'Lantai dudukan tiang scaffold rata',
@@ -289,8 +290,10 @@ function FormKondisiGas({
 
 export default function SKKPage() {
   const router = useRouter();
-  const { sika, markSertifikatFilled } = useProgramStore();
+  const { sika, markSertifikatFilled, setSertifikatData } = useProgramStore();
   const { user } = useAuthStore();
+
+  const NAMA = 'Sertifikat Kerja Di Ketinggian (SKK)';
 
   const canEditPA = user?.role === 'pemberi';
   const canEditIA = user?.role === 'pja';
@@ -350,8 +353,38 @@ export default function SKKPage() {
   const totalFilled = totalPA + totalIA;
   const totalItems = checklistItemsPA.length + checklistItemsIA.length;
 
+  // Menyusun seluruh data isian SKK menjadi satu objek — mengikuti pola
+  // yang sama dengan buildData() di sika/sertifikat/skp & skd/page.tsx —
+  // supaya Detail Program bisa menampilkan data ini via sertifikatData.
+  // Checklist PA dan IA digabung jadi satu daftar checklist supaya tabel
+  // umum di Detail Program tetap terisi, dengan label yang menandai
+  // masing-masing sumber (PA/IA).
+  const buildData = () => ({
+    tanggalTerbit,
+    jamMulai,
+    jamSelesai,
+    berlakuHingga,
+    checklist: [
+      ...buildChecklist(checklistItemsPA.map(l => `[PA] ${l}`), checklistPA),
+      ...buildChecklist(checklistItemsIA.map(l => `[IA] ${l}`), checklistIA),
+    ],
+    checklistDocs: {},
+    verifikasi,
+    gasMonitoring,
+    gasRows,
+    diukurOleh,
+    lainnya: {
+      jenisPerancahChecked: jenisPerancah.filter((_, i) => jenisPerancahChecked[i]),
+      namaInspektur,
+      noPekerja,
+      fungsiInspektur,
+      materialFields,
+    },
+  });
+
   const handleSimpan = () => {
-    markSertifikatFilled('Sertifikat Kerja di Ketinggian (SKK)');
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
     setShowSuccess(true);
     setTimeout(() => {
       router.push('/dashboard/pemohon/sika/new');
@@ -359,7 +392,8 @@ export default function SKKPage() {
   };
 
   const handleSaveAndClose = () => {
-    markSertifikatFilled('Sertifikat Kerja di Ketinggian (SKK)');
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
     router.push('/dashboard/pemohon/sika/new');
   };
 

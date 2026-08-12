@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useProgramStore } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
 import { Users, Lock, CheckCircle, Paperclip, X, FileText, Plus, Trash2 } from 'lucide-react';
+import { buildChecklist } from '@/lib/sertifikatUtils';
 
 // Flat single-column checklist items
 const checklistSingle = [
@@ -372,8 +373,10 @@ function FormKondisiGas({
 
 export default function SKGPage() {
   const router = useRouter();
-  const { sika, markSertifikatFilled } = useProgramStore();
+  const { sika, markSertifikatFilled, setSertifikatData } = useProgramStore();
   const { user } = useAuthStore();
+
+  const NAMA = 'Sertifikat Kerja Penggalian (SKG)';
 
   const canEditPA = user?.role === 'pemberi';
   const canEditIA = user?.role === 'pja';
@@ -471,8 +474,58 @@ export default function SKGPage() {
 
   const sudahIsiGas = gasRows.some(r => r.time || r.lel || r.o2 || r.h2s || r.co2 || r.co || r.temp || r.sign || r.remark);
 
+  // Menyusun seluruh data isian SKG menjadi satu objek — mengikuti pola
+  // yang sama dengan buildData() di sika/sertifikat/skp & skd/page.tsx —
+  // supaya Detail Program bisa menampilkan data ini via sertifikatData.
+  // Item checklist SKG di halaman ini terbagi jadi 2 kelompok: 3 item
+  // "Kondisi Peralatan" bertipe multi-kolom (multiChecklist) dan 10 item
+  // flat (checklistSingle) — keduanya digabung jadi satu daftar checklist
+  // memakai buildChecklist supaya tabel di Detail Program tetap terisi.
+  const buildData = () => {
+    const kondisiPeralatanLabels = [
+      'Objek yang digali berbahaya?',
+      'Objek yang digali rusak?',
+      'Tipe penggalian: mekanik?',
+      'Tipe penggalian: manual/hand digging?',
+      'Peralatan deteksi logam: detektor logam?',
+      'Peralatan deteksi logam: manual/hand digging?',
+    ];
+    const kondisiPeralatanKeys = ['c1_berbahaya', 'c1_rusak', 'c2_mekanik', 'c2_manual', 'c3_detektor', 'c3_manual'];
+    const kondisiPeralatanChecklist = kondisiPeralatanKeys.map((key, i) => ({
+      label: kondisiPeralatanLabels[i],
+      value: multiChecklist[key] ?? null,
+    }));
+
+    return {
+      tanggalTerbit,
+      jamMulai,
+      jamSelesai,
+      berlakuHingga,
+      checklist: [...kondisiPeralatanChecklist, ...buildChecklist(checklistSingle, checklist)],
+      checklistDocs: Object.fromEntries(
+        Object.entries(checklistDocs).map(([key, doc]) => [
+          key,
+          doc ? { name: doc.file.name, size: doc.file.size, type: doc.file.type } : null,
+        ])
+      ),
+      verifikasi,
+      gasMonitoring,
+      gasRows,
+      diukurOleh,
+      lainnya: {
+        diisiOlehIA,
+        kedalaman,
+        kedalamanCustom,
+        pencegahanLain,
+        keteranganTambahan,
+        verLapChecklist,
+      },
+    };
+  };
+
   const handleSimpan = () => {
-    markSertifikatFilled('Sertifikat Kerja Penggalian (SKG)');
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
     setShowSuccess(true);
     setTimeout(() => {
       router.push('/dashboard/pemohon/sika/new');
@@ -480,7 +533,8 @@ export default function SKGPage() {
   };
 
   const handleSaveAndClose = () => {
-    markSertifikatFilled('Sertifikat Kerja Penggalian (SKG)');
+    markSertifikatFilled(NAMA);
+    setSertifikatData(NAMA, buildData(), user?.name || 'Pemohon');
     router.push('/dashboard/pemohon/sika/new');
   };
 
