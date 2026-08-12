@@ -1,5 +1,5 @@
 import type { SubmissionRecord, ApprovalLogEntry } from '@/store/programStore';
-import { getOverallStatus, getNomorSika } from '@/store/programStore';
+import { getOverallStatus, getNomorSika, getRevalidasiOverride, MAX_HARI_REVALIDASI } from '@/store/programStore';
 
 export type NotifSeverity = 'success' | 'danger' | 'warning' | 'info';
 
@@ -11,8 +11,6 @@ export interface AppNotification {
   severity: NotifSeverity;
   timestamp: string;
 }
-
-const MAX_HARI_REVALIDASI = 7;
 
 function digitsToDateString(digits?: string[]): string | null {
   if (!digits || digits.length !== 6 || digits.some((d) => !d)) return null;
@@ -45,10 +43,14 @@ function toDateKey(d: Date) {
 }
 
 const AKSI_LABEL: Record<'approve' | 'reject', string> = { approve: 'disetujui', reject: 'ditolak' };
-const DOKUMEN_LABEL: Record<'sika' | 'jsa' | 'perubahan', string> = {
+// 'revalidasi' = log approve/reject seputar pengajuan PEMULIHAN setelah SIKA
+// sempat Suspend (lihat ajukanRevalidasiSuspend di store) — beda dari
+// 'perubahan' yang soal pengajuan perubahan DATA (sertifikat/pekerja baru).
+const DOKUMEN_LABEL: Record<'sika' | 'jsa' | 'perubahan' | 'revalidasi', string> = {
   sika: 'SIKA',
   jsa: 'JSA',
   perubahan: 'Perubahan data',
+  revalidasi: 'Pemulihan SIKA (Suspend)',
 };
 const PERAN_LABEL: Record<'pemberi' | 'pja', string> = {
   pemberi: 'Pemberi Kerja',
@@ -59,9 +61,12 @@ const PERAN_LABEL: Record<'pemberi' | 'pja', string> = {
  * Menghasilkan daftar notifikasi untuk PEMOHON, dari dua sumber:
  * 1. approvalHistory — event approve/reject asli dari Pemberi/PJA (real, sudah
  *    ada id & timestamp sendiri, jadi id notifikasi dipakai ulang dari log.id).
- * 2. Status submission saat ini — revalidasi jatuh tempo & masa berlaku SIKA,
- *    dihitung ulang tiap kali dipanggil (bukan disimpan), supaya selalu akurat
- *    terhadap tanggal hari ini tanpa perlu job/cron terpisah.
+ * 2. Status submission saat ini — revalidasi jatuh tempo, Suspend, & masa
+ *    berlaku SIKA, dihitung ulang tiap kali dipanggil (bukan disimpan),
+ *    supaya selalu akurat terhadap tanggal hari ini tanpa perlu job/cron
+ *    terpisah. Status Suspend/auto-Closed dihitung lewat getRevalidasiOverride
+ *    dari store — SATU sumber kebenaran yang sama dipakai Data Management,
+ *    supaya notifikasi ini tidak pernah beda cerita dengan badge di tabel.
  */
 export function getNotifications(
   submissions: SubmissionRecord[],
@@ -70,7 +75,7 @@ export function getNotifications(
   const notifs: AppNotification[] = [];
   const todayKey = toDateKey(new Date());
 
-  // 1) Keputusan Pemberi/PJA/perubahan
+  // 1) Keputusan Pemberi/PJA/perubahan/revalidasi
   for (const log of approvalHistory) {
     if (log.peran === 'pemohon' || !log.submissionId) continue;
     if (log.aksi !== 'approve' && log.aksi !== 'reject') continue;
@@ -86,7 +91,10 @@ export function getNotifications(
     notifs.push({
       id: log.id,
       submissionId: sub.id,
-      title: `${dokLabel} ${aksiLabel}`,
+      title:
+        log.dokumen === 'revalidasi'
+          ? (log.aksi === 'approve' ? 'Pemulihan SIKA disetujui' : 'Pemulihan SIKA ditolak')
+          : `${dokLabel} ${aksiLabel}`,
       message:
         log.aksi === 'reject' && log.alasan
           ? `${namaProgram} — ${dokLabel} ditolak oleh ${peranLabel}: ${log.alasan}`
@@ -96,7 +104,7 @@ export function getNotifications(
     });
   }
 
-  // 2) Revalidasi & masa berlaku SIKA
+  // 2) Revalidasi (termasuk Suspend) & masa berlaku SIKA
   for (const sub of submissions) {
     const overall = getOverallStatus(
       sub.sikaStatusPemberi,
@@ -109,26 +117,61 @@ export function getNotifications(
 
     if (overall === 'aktif') {
       const hariKe = getHariKeIni(sub.createdAt);
-      const sudahValidasiHariIni = sub.riwayatRevalidasi.includes(todayKey);
+      const override = getRevalidasiOverride(sub.createdAt, sub.riwayatRevalidasi);
 
-      if (hariKe > MAX_HARI_REVALIDASI) {
+      if (override === 'closed') {
         notifs.push({
           id: `revalidasi-limit-${sub.id}`,
           submissionId: sub.id,
           title: 'Batas revalidasi terlampaui',
-          message: `${namaProgram} sudah melewati batas ${MAX_HARI_REVALIDASI} hari revalidasi — ajukan SIKA baru.`,
+          message: `${namaProgram} sudah melewati batas ${MAX_HARI_REVALIDASI} hari revalidasi — SIKA otomatis Closed, ajukan SIKA baru.`,
           severity: 'danger',
           timestamp: sub.updatedAt,
         });
-      } else if (!sudahValidasiHariIni && sub.perubahanStatus !== 'menunggu') {
-        notifs.push({
-          id: `revalidasi-due-${sub.id}-${todayKey}`,
-          submissionId: sub.id,
-          title: 'Revalidasi harian menunggu',
-          message: `${namaProgram} perlu divalidasi hari ini (hari ke-${hariKe} dari ${MAX_HARI_REVALIDASI}).`,
-          severity: 'warning',
-          timestamp: sub.updatedAt,
-        });
+      } else if (override === 'suspend') {
+        const req = sub.revalidasiSuspendRequest;
+        if (req?.status === 'menunggu') {
+          notifs.push({
+            id: `suspend-pending-${sub.id}`,
+            submissionId: sub.id,
+            title: 'Menunggu approval pemulihan',
+            message: `${namaProgram} sedang Suspend — pengajuan pemulihan menunggu persetujuan Pemberi Kerja.`,
+            severity: 'warning',
+            timestamp: sub.updatedAt,
+          });
+        } else if (req?.status === 'ditolak') {
+          notifs.push({
+            id: `suspend-rejected-${sub.id}`,
+            submissionId: sub.id,
+            title: 'Pengajuan pemulihan ditolak',
+            message: req.alasanTolak
+              ? `${namaProgram} masih Suspend — Pemberi Kerja menolak pemulihan: ${req.alasanTolak}`
+              : `${namaProgram} masih Suspend — Pemberi Kerja menolak pengajuan pemulihan. Ajukan ulang lewat Data Management.`,
+            severity: 'danger',
+            timestamp: sub.updatedAt,
+          });
+        } else {
+          notifs.push({
+            id: `suspend-${sub.id}`,
+            submissionId: sub.id,
+            title: 'SIKA di-suspend',
+            message: `${namaProgram} di-suspend karena revalidasi kemarin terlewat. Ajukan pemulihan lewat Data Management.`,
+            severity: 'danger',
+            timestamp: sub.updatedAt,
+          });
+        }
+      } else {
+        const sudahValidasiHariIni = sub.riwayatRevalidasi.includes(todayKey);
+        if (!sudahValidasiHariIni && sub.perubahanStatus !== 'menunggu') {
+          notifs.push({
+            id: `revalidasi-due-${sub.id}-${todayKey}`,
+            submissionId: sub.id,
+            title: 'Revalidasi harian menunggu',
+            message: `${namaProgram} perlu divalidasi hari ini (hari ke-${hariKe} dari ${MAX_HARI_REVALIDASI}).`,
+            severity: 'warning',
+            timestamp: sub.updatedAt,
+          });
+        }
       }
     }
 
