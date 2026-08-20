@@ -1,22 +1,17 @@
 'use client';
 
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
-import { Pencil, ChevronLeft, Check, FileText } from 'lucide-react';
-import { useProgramStore, getOverallStatus } from '@/store/programStore';
-import type { SertifikatData, SikaData } from '@/store/programStore';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { useRouter, useParams } from 'next/navigation';
+import { CheckCircle, XCircle, Clock, FileText, History, Check, ArrowLeft } from 'lucide-react';
+import { useProgramStore, getNomorSika } from '@/store/programStore';
+import type { ApprovalStatus, SertifikatData, SikaData } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
-import jsPDF from 'jspdf';
-import { toPng } from 'html-to-image';
 
 /* =========================================================================
- * Small "printed form" building blocks
- * These mimic the layout language of the physical SIKA form (label : value
- * rows, checkbox lists, D/D/M/M/Y/Y date boxes, colored side rails) instead
- * of the previous card/pill web style.
+ * Printed-form building blocks — sama persis dengan yang dipakai di halaman
+ * Detail Program milik Pemohon dan Pemberi Review.
  * ======================================================================= */
 
-// "Label : value" line, the basic unit of the printed form.
 function FormField({
   label,
   value,
@@ -35,9 +30,6 @@ function FormField({
   );
 }
 
-// Renders selected values as checked boxes — for genuinely open-ended data
-// (PIC names, worker names) where there is no fixed master list to compare
-// against, so only the values actually entered are shown.
 function CheckList({ items, columns = 2 }: { items?: string[]; columns?: number }) {
   if (!items?.length) return <span className="text-gray-400 text-xs italic">Belum dipilih</span>;
   return (
@@ -54,10 +46,6 @@ function CheckList({ items, columns = 2 }: { items?: string[]; columns?: number 
   );
 }
 
-// Renders EVERY master-list option (checked or not) — the way the physical
-// SIKA form prints the full checklist and marks whichever ones apply.
-// `selected` marks which of `options` were actually checked in the SIKA/JSA
-// input forms; unselected options still print, just visually muted.
 function FullCheckList({ options, selected, columns = 2 }: { options: string[]; selected?: string[]; columns?: number }) {
   return (
     <div className="grid gap-x-4 gap-y-1" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0,1fr))` }}>
@@ -79,13 +67,6 @@ function FullCheckList({ options, selected, columns = 2 }: { options: string[]; 
     </div>
   );
 }
-
-/* =========================================================================
- * Master option lists — copied verbatim from the "Pengisian SIKA"
- * (sika/new) and "Pengisian JSA" (jsa/new) input pages, so the printed
- * detail page shows the exact same full checklist those forms use, with
- * whatever the applicant actually checked marked on top of it.
- * ======================================================================= */
 
 const ISOLASI_OPTIONS = [
   'Electrical Circuits', 'Gas Valve', 'Water Valves',
@@ -155,7 +136,6 @@ const PPE_OPTIONS = [
   'Coveralls', 'Catridge / Filter Mask', 'Fire Extinguisher', 'Others :',
 ];
 
-// Six-box D D / M M / Y Y date entry, matching the physical SIKA form.
 function DateBoxes({ digits }: { digits?: string[] }) {
   const cells = digits && digits.length === 6 ? digits : Array(6).fill('');
   const labels = ['D', 'D', 'M', 'M', 'Y', 'Y'];
@@ -173,7 +153,6 @@ function DateBoxes({ digits }: { digits?: string[] }) {
   );
 }
 
-// Vertical colored sidebar label running top-to-bottom, e.g. "PERMINTAAN".
 function SectionRail({ color, text }: { color: string; text: string }) {
   return (
     <div className="flex items-center justify-center shrink-0" style={{ width: 26, background: color }}>
@@ -196,25 +175,6 @@ function SectionHeader({ title, right }: { title: string; right?: ReactNode }) {
   );
 }
 
-function EditLink({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex items-center gap-1 text-blue-700 text-[11px] font-semibold hover:underline"
-    >
-      <Pencil size={10} /> Edit
-    </button>
-  );
-}
-
-// Turns the 6-digit [D,D,M,M,Y,Y] arrays used in the SIKA form back into a
-// readable "DD/MM/20YY" string when needed as plain text.
-function formatDigitDate(digits?: string[]): string {
-  if (!digits || digits.length !== 6 || digits.some((d) => !d)) return '-';
-  const [d1, d2, m1, m2, y1, y2] = digits;
-  return `${d1}${d2}/${m1}${m2}/20${y1}${y2}`;
-}
-
 const getRiskBadgeStyle = (value: string) => {
   const v = (value || '').trim().toLowerCase();
   if (!v) return { bg: '#f1f5f9', text: '#94a3b8' };
@@ -225,16 +185,7 @@ const getRiskBadgeStyle = (value: string) => {
 };
 
 /* =========================================================================
- * Detail Sertifikat Kerja (SKP, SKD, dst.) — read-only, dipakai di bawah
- * dokumen SIKA/JSA. Bentuk data mengikuti buildData() di halaman pengisian
- * sertifikat masing-masing (mis. sika/sertifikat/skp/page.tsx): checklist
- * (dari buildChecklist di lib/sertifikatUtils.ts), checklistDocs,
- * verifikasi, dan opsional gasMonitoring + gasRows + diukurOleh.
- *
- * SENGAJA generik terhadap `nama` sertifikat: selama halaman pengisiannya
- * menyimpan data dengan pola yang sama (checklist + verifikasi, opsional
- * gas monitoring), komponen ini otomatis merender sertifikat apa pun yang
- * dicentang di sika.sertifikat tanpa perlu tahu satu per satu jenisnya.
+ * Detail Sertifikat Kerja
  * ======================================================================= */
 
 function YesNoCell({ active, type }: { active: boolean; type: 'yes' | 'no' }) {
@@ -379,10 +330,6 @@ function GasMonitoringResultTable({ rows, diukurOleh }: { rows?: any[]; diukurOl
   );
 }
 
-// Sub-header dalam kartu sertifikat, meniru warna & label "Bagian N" persis
-// seperti di halaman pengisian sertifikat (mis. Bagian 3 kuning, Bagian 4
-// hijau, Bagian 5 ungu) supaya orang yang sudah familiar dengan halaman
-// pengisian langsung mengenali bagian yang sama di Detail Program.
 function CertSectionHeader({
   title, bg, color, right,
 }: { title: string; bg: string; color: string; right?: ReactNode }) {
@@ -394,12 +341,6 @@ function CertSectionHeader({
   );
 }
 
-// Safety notes — setiap sertifikat kerja punya daftar catatan keselamatan
-// sendiri (persis seperti di masing-masing halaman pengisian, mis.
-// sika/sertifikat/skp/page.tsx, .../skd/page.tsx, dst). Disimpan sebagai
-// map bernama supaya Bagian 5 di Detail Program menampilkan catatan yang
-// sama persis dengan halaman pengisian aslinya untuk sertifikat apa pun,
-// bukan hanya SKP.
 const CERT_SAFETY_NOTES: Record<string, string[]> = {
   'Sertifikat Kerja Panas (SKP)': [
     'Bahaya dalam melaksanakan pekerjaan sekaligus sebagai penyebab dasar kecelakaan adalah karena 3 faktor utama yaitu TIDAK TAHU, TIDAK MAMPU dan/atau TIDAK MAU.',
@@ -490,14 +431,6 @@ const CERT_SAFETY_NOTES: Record<string, string[]> = {
   ],
 };
 
-// Hero header sertifikat — meniru persis header halaman pengisian
-// (mis. sika/sertifikat/skp/page.tsx): nomor form di kanan atas, lalu
-// baris "Rujukan SIKA No." | banner judul warna | logo, lalu status bar
-// biru berisi jumlah item checklist yang sudah terisi. Warna banner
-// mengikuti warna hero di halaman pengisian masing-masing sertifikat;
-// untuk sertifikat yang skema warnanya belum diketahui, fallback ke biru
-// tua (#1d4ed8) supaya tetap konsisten dengan skema warna Bagian 1/2 di
-// bawahnya, bukan warna acak.
 const CERT_HERO_STYLE: Record<string, { color: string; formCode?: string }> = {
   'Sertifikat Kerja Panas (SKP)': { color: '#ff0000', formCode: 'F-011/B-003/PG0300/2026-S9' },
   'Sertifikat Kerja Dingin (SKD)': { color: '#0070c0', formCode: 'F-012/B-003/PG0300/2026-S9' },
@@ -573,17 +506,11 @@ function SertifikatDetailCard({
   const totalChecklist = data?.checklist?.length ?? 0;
   const totalFilled = yesCount + noCount;
   const totalDocs = data?.checklistDocs ? Object.values(data.checklistDocs).filter(Boolean).length : 0;
-  // Safety notes bersifat statis (referensi keselamatan, bukan input
-  // pemohon) dan berbeda-beda per jenis sertifikat — diambil dari
-  // CERT_SAFETY_NOTES yang isinya sama persis dengan safetyNotes di
-  // masing-masing halaman pengisian sertifikat.
   const safetyNotesForCert = CERT_SAFETY_NOTES[nama];
 
   return (
     <div className="border-t-2 border-gray-900">
       {!record ? (
-        // Belum diisi sama sekali — header ringkas, tidak perlu meniru hero
-        // penuh karena tidak ada data (rujukan SIKA, dsb) untuk ditampilkan.
         <div className="flex items-center justify-between bg-gray-800 px-4 py-2.5">
           <span className="text-white text-[12px] font-bold tracking-wide uppercase">{nama}</span>
           <span className="text-[10px] text-gray-300 italic">Belum diisi</span>
@@ -605,7 +532,6 @@ function SertifikatDetailCard({
         </div>
       ) : (
         <div className="bg-white">
-          {/* Bagian 1 — Tanggal Terbit / Jam Kerja / Berlaku Hingga */}
           <CertSectionHeader title="Bagian 1 — Tanggal Terbit" bg="#dbeafe" color="#1d4ed8" />
           <div className="grid grid-cols-3 gap-6 px-4 py-3">
             <FormField label="Tanggal Terbit" value={data.tanggalTerbit} labelWidth="w-32" />
@@ -617,7 +543,6 @@ function SertifikatDetailCard({
             <FormField label="Berlaku Hingga" value={data.berlakuHingga} labelWidth="w-32" />
           </div>
 
-          {/* Bagian 2 — Jenis Pekerjaan (mengikuti data SIKA yang sama) */}
           <CertSectionHeader
             title="Bagian 2 — Jenis Pekerjaan"
             bg="#dbeafe"
@@ -635,7 +560,6 @@ function SertifikatDetailCard({
             <FormField label="Peralatan Digunakan" value={sika?.peralatanDigunakan} labelWidth="w-44" />
           </div>
 
-          {/* Bagian 3 — Pemeriksaan */}
           <CertSectionHeader
             title="Bagian 3 — Pemeriksaan"
             bg="#FFFF00"
@@ -655,7 +579,6 @@ function SertifikatDetailCard({
             <ChecklistResultTable checklist={data.checklist} checklistDocs={data.checklistDocs} />
           </div>
 
-          {/* Bagian 4 — Verifikasi Lapangan */}
           <CertSectionHeader title="Bagian 4 — Verifikasi Lapangan" bg="#00b050" color="#ffffff" />
           <div className="px-4 py-3 grid grid-cols-2 gap-4">
             <VerifikasiResultPanel
@@ -672,7 +595,6 @@ function SertifikatDetailCard({
             />
           </div>
 
-          {/* Bagian 5 — Kegiatan */}
           <CertSectionHeader
             title="Bagian 5 — Kegiatan"
             bg="#993366"
@@ -714,7 +636,6 @@ function SertifikatDetailCard({
             )}
           </div>
 
-          {/* Distribusi */}
           <div className="flex">
             <div className="flex items-center px-4 py-2 shrink-0" style={{ backgroundColor: '#c8b89a', minWidth: '120px' }}>
               <span className="text-[10px] font-bold text-black uppercase tracking-widest">Distribusi:</span>
@@ -735,150 +656,81 @@ function SertifikatDetailCard({
   );
 }
 
-export default function DetailProgramPage() {
+/* =========================================================================
+ * STATUS BADGE untuk PJA — hanya display
+ * ======================================================================= */
+
+const STATUS_LABEL: Record<ApprovalStatus, { label: string; bg: string; text: string }> = {
+  draft:    { label: 'Draft',     bg: '#8A94A6', text: 'white' },
+  request:  { label: 'Request',   bg: '#0E76BC', text: 'white' },
+  waiting:  { label: 'Menunggu',  bg: '#F2A900', text: 'white' },
+  approved: { label: 'Disetujui', bg: '#00954E', text: 'white' },
+  rejected: { label: 'Ditolak',   bg: '#E31E24', text: 'white' },
+};
+
+function StatusBadgePJA({ status }: { status: ApprovalStatus }) {
+  const cfg = STATUS_LABEL[status];
+  return (
+    <span
+      className="inline-flex items-center h-5 leading-none text-[10px] font-medium px-2.5 py-1 rounded-full whitespace-nowrap text-white shadow-sm"
+      style={{ background: cfg.bg }}
+    >
+      {cfg.label}
+    </span>
+  );
+}
+
+/* =========================================================================
+ * MAIN PAGE — PJA REVIEW (VIEW ONLY, TIDAK ADA APPROVAL)
+ * ======================================================================= */
+
+export default function PJAReviewPage() {
   const router = useRouter();
-  const {
-    program, jsa, sika,
-    setJsaStatus, submitToPemberi,
-    sikaStatusPemberi, jsaStatusPemberi,
-    sikaStatusPJA, jsaStatusPJA,
-    activeSubmissionId, catatRevalidasi,
-    submissions, ajukanPerubahanRevalidasi,
-    sertifikatData,
-  } = useProgramStore();
-  const { user } = useAuthStore();
-  const contentRef = useRef<HTMLDivElement>(null);
-  // Ref khusus dokumen SIKA (tanpa sertifikat di dalamnya) supaya bisa
-  // di-screenshot terpisah dari tiap kartu sertifikat saat export PDF.
-  const sikaDocRef = useRef<HTMLDivElement>(null);
-  // Ref per sertifikat, keyed by nama sertifikat, supaya masing-masing bisa
-  // di-screenshot & ditaruh di halaman PDF-nya sendiri-sendiri.
-  const certRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const [isExporting, setIsExporting] = useState(false);
-  const [catatanRevalidasi, setCatatanRevalidasi] = useState('');
+  const params = useParams();
+  const id = params?.id as string;
+
+  // FIX: `approvalHistory` sebelumnya diambil dari `record.approvalHistory`,
+  // padahal properti itu tidak pernah ada di SubmissionRecord — approvalHistory
+  // adalah array TERPISAH di level store (lihat interface ProgramStore di
+  // programStore.ts). record.approvalHistory selalu undefined secara tipe,
+  // itu sebabnya muncul error merah. Sekarang diambil langsung dari store lalu
+  // difilter berdasarkan submissionId.
+  const { submissions, sertifikatData, approvalHistory } = useProgramStore();
+
+  const record = submissions.find((s) => s.id === id);
 
   useEffect(() => {
-    if (!program) router.replace('/dashboard/pemohon/program/new');
-    else if (!sika) router.replace('/dashboard/pemohon/sika/new');
-    else if (!jsa) router.replace('/dashboard/pemohon/jsa/new');
-  }, [program, sika, jsa]);
-
-  const alreadySubmitted = sikaStatusPemberi !== 'draft' || jsaStatusPemberi !== 'draft';
-
-  // Status gabungan submission yang sedang dibuka. Kalau ini sudah pernah
-  // 'aktif' (disetujui Pemberi) atau 'closed' (disetujui Pemberi + PJA) dan
-  // pemohon kembali ke halaman ini — biasanya karena masuk lewat "Perlu
-  // menambah sertifikat, pekerja baru, atau perubahan lain?" di modal
-  // Revalidasi (Data Management) — maka yang relevan bukan "Request Review"
-  // (itu untuk pengajuan yang belum pernah disetujui), melainkan mengirim
-  // ulang data yang sudah diperbarui sebagai konfirmasi revalidasi.
-  const overallStatus = getOverallStatus(sikaStatusPemberi, jsaStatusPemberi, sikaStatusPJA, jsaStatusPJA);
-  const isRevalidasiUpdate = overallStatus === 'aktif' || overallStatus === 'closed';
-
-  // Submission yang sedang aktif dibuka, buat cek apakah perubahan yang
-  // barusan dikirim masih menunggu keputusan Pemberi (mencegah double-submit
-  // & kasih label yang jelas di tombol).
-  const activeSubmission = submissions.find((s) => s.id === activeSubmissionId);
-  const perubahanMenunggu = activeSubmission?.perubahanStatus === 'menunggu';
-
-  const handleRequestReview = () => {
-    const hasLangkah = jsa?.sections?.some((sec) =>
-      sec.rows.some((row) => row.langkah.trim() !== '')
-    );
-    if (!hasLangkah) {
-      alert('Lengkapi form JSA (langkah kerja) terlebih dahulu sebelum mengajukan review.');
-      return;
+    if (!record) {
+      router.replace('/dashboard/pja/approval-management');
     }
-    setJsaStatus('request_review');
-    submitToPemberi(user?.name || 'Pemohon');
-    alert('SIKA dan JSA berhasil diajukan ke Pemberi Kerja untuk direview.');
-    router.push('/dashboard/pemohon/data-management');
-  };
+  }, [record, router]);
 
-  // Kirim ulang data yang sudah diperbarui (sertifikat/pekerja baru/dll) ke
-  // Pemberi Kerja sebagai konfirmasi revalidasi — bukan pengajuan baru dari
-  // nol. Sengaja memakai ajukanPerubahanRevalidasi (bukan submitToPemberi):
-  // itu hanya mengubah `perubahanStatus`, tidak menyentuh sikaStatusPemberi/
-  // jsaStatusPemberi, jadi SIKA yang sedang berjalan TETAP berstatus
-  // 'aktif'/'closed' selama menunggu Pemberi meninjau perubahan ini —
-  // bukan balik jadi "Belum berlaku" di Data Management.
-  const handleKirimRevalidasi = () => {
-    const hasLangkah = jsa?.sections?.some((sec) =>
-      sec.rows.some((row) => row.langkah.trim() !== '')
-    );
-    if (!hasLangkah) {
-      alert('Lengkapi form JSA (langkah kerja) terlebih dahulu sebelum mengirim konfirmasi revalidasi.');
-      return;
-    }
-    if (!activeSubmissionId) return;
-    ajukanPerubahanRevalidasi(user?.name || 'Pemohon', catatanRevalidasi.trim() || undefined);
-    catatRevalidasi(activeSubmissionId, new Date().toISOString().split('T')[0]);
-    setCatatanRevalidasi('');
-    alert('Konfirmasi revalidasi & perubahan data berhasil dikirim ke Pemberi Kerja untuk direview.');
-    router.push('/dashboard/pemohon/data-management');
-  };
+  const [showHistory, setShowHistory] = useState(false);
 
-  // Export PDF: setiap "section" (dokumen SIKA, lalu masing-masing kartu
-  // sertifikat) di-screenshot TERPISAH dan ditaruh di halaman PDF-nya
-  // sendiri lewat pdf.addPage() — supaya SIKA dan tiap sertifikat tidak
-  // pernah nyambung jadi satu lembar panjang. Kalau satu section-nya sendiri
-  // lebih tinggi dari satu halaman A4, section itu baru dipecah jadi
-  // beberapa halaman berurutan (perilaku lama), tapi tetap tidak akan
-  // tercampur dengan section lain.
-  const handleCopyJSA = async () => {
-    const sections: HTMLDivElement[] = [];
-    if (sikaDocRef.current) sections.push(sikaDocRef.current);
-    sika?.sertifikat?.forEach((nama) => {
-      const el = certRefs.current[nama];
-      if (el) sections.push(el);
-    });
-    if (!sections.length) return;
+  if (!record) return null;
 
-    setIsExporting(true);
-    try {
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
+  const { program, sika, jsa } = record;
 
-      for (let i = 0; i < sections.length; i++) {
-        const dataUrl = await toPng(sections[i], {
-          cacheBust: true,
-          pixelRatio: 2,
-          backgroundColor: '#ffffff',
-        });
-
-        const img = new Image();
-        img.src = dataUrl;
-        await new Promise<void>((res) => { img.onload = () => res(); });
-
-        const imgHeight = (img.height * pdfWidth) / img.width;
-
-        if (i > 0) pdf.addPage();
-
-        if (imgHeight > pageHeight) {
-          let yOffset = 0;
-          let firstSlice = true;
-          while (yOffset < imgHeight) {
-            if (!firstSlice) pdf.addPage();
-            pdf.addImage(dataUrl, 'PNG', 0, -yOffset, pdfWidth, imgHeight);
-            yOffset += pageHeight;
-            firstSlice = false;
-          }
-        } else {
-          pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, imgHeight);
-        }
-      }
-
-      pdf.save(`JSA_${jsa?.jsaNo || 'export'}.pdf`);
-    } catch (err) {
-      console.error('Export error:', err);
-      alert('Gagal mengexport PDF. Silakan coba lagi.');
-    } finally {
-      setIsExporting(false);
-    }
-  };
-
+  const noSikaGabungan = getNomorSika(sika);
   const hasLangkahKerja = jsa?.sections?.some((sec) => sec.rows.some((r) => r.langkah.trim() !== ''));
+
+  // Riwayat khusus submission INI — diambil dari approvalHistory milik store,
+  // bukan dari record (lihat catatan FIX di atas).
+  const relevantHistory = approvalHistory
+    .filter((h) => h.submissionId === id)
+    .slice()
+    .reverse();
+
+  const formatTimestamp = (ts: string) => {
+    try {
+      return new Date(ts).toLocaleString('id-ID', {
+        day: '2-digit', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+      });
+    } catch {
+      return ts;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -887,412 +739,472 @@ export default function DetailProgramPage() {
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
           <div className="flex flex-col leading-tight border-l-4 border-blue-600 pl-3">
-            <span className="text-sm font-bold text-gray-800 tracking-tight">Detail Program</span>
+            <span className="text-sm font-bold text-gray-800 tracking-tight">Detail Review</span>
             <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
-              Surat Izin Kerja (SIKA) &amp; Job Safety Analysis (JSA)
+              Penanggung Jawab Aset (PJA) — View Only
             </span>
           </div>
         </div>
-
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-0">
-            {[
-              { label: 'Program', active: false },
-              { label: 'Pengisian SIKA', active: false },
-              { label: 'Pengisian JSA', active: false },
-              { label: 'Detail Program', active: true },
-            ].map((step, i, arr) => (
-              <div key={step.label} className="flex items-center">
-                <div className="flex items-center gap-2 px-2">
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                    step.active ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'
-                  }`}>
-                    {i + 1}
-                  </div>
-                  <span className={`text-xs font-medium ${step.active ? 'text-blue-600' : 'text-gray-400'}`}>
-                    {step.label}
-                  </span>
-                </div>
-                {i < arr.length - 1 && <div className="w-6 h-px bg-gray-200" />}
-              </div>
-            ))}
-          </div>
-
-          <div className="w-px h-8 bg-gray-200" />
-
-          <div className="flex items-center gap-2" style={{ paddingRight: '1px' }}>
-            <img
-              src="/logopertaminagasfull.svg"
-              alt="Pertamina Gas"
-              className="h-8 object-contain"
-            />
-          </div>
+        <div className="flex items-center gap-3 pr-6">
+          <img
+            src="/logopertaminagasfull.svg"
+            alt="Pertamina Gas"
+            className="h-8 object-contain"
+          />
         </div>
       </div>
 
-      <div ref={contentRef} className="bg-gray-100">
-        {/* ================= DOCUMENT BODY (didesain ulang seperti form cetak) ================= */}
-        <div className="px-4 sm:px-8 lg:px-14 xl:px-20 py-8 space-y-6">
-          {/* ---- Dokumen SIKA (ref sendiri: 1 section = 1 halaman PDF) ---- */}
-          <div
-            ref={sikaDocRef}
-            className="mx-auto w-full bg-white border-2 border-gray-900 text-[13px] text-gray-800 shadow-[0_4px_28px_rgba(15,23,42,0.10)]"
-            style={{ maxWidth: '1680px' }}
-          >
-            {/* ---- Judul dokumen: Nomor SIKA | Judul | Logo ---- */}
-            <div className="grid grid-cols-[300px_1fr_260px] border-b-2 border-gray-900">
-              <div className="border-r-2 border-gray-900 p-4">
-                <span className="font-bold text-[13px]">Nomor SIKA :</span>
-                <div className="flex items-center gap-1.5 mt-1.5">
-                  <div className="border border-gray-500 bg-gray-50 px-2.5 py-1.5 text-[11px] text-center flex-1 truncate">
-                    {sika?.noSikaAreaFungsi || '-'}
-                  </div>
-                  <span className="text-[11px]">-</span>
-                  <div className="border border-gray-500 bg-gray-50 px-2.5 py-1.5 text-[11px] text-center flex-1 truncate">
-                    {sika?.noSikaNomorUrut || '-'}
-                  </div>
+      {/* ================= BUTTON BACK ================= */}
+      <div className="px-4 sm:px-8 lg:px-14 xl:px-20 pt-4">
+        <button
+          onClick={() => router.push('/dashboard/pja/approval-management')}
+          className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 transition"
+        >
+          <ArrowLeft size={14} />
+          Kembali ke Approval Management
+        </button>
+      </div>
+
+      {/* ================= DOKUMEN ================= */}
+      <div className="px-4 sm:px-8 lg:px-14 xl:px-20 py-4">
+        <div
+          className="mx-auto w-full bg-white border-2 border-gray-900 text-[13px] text-gray-800 shadow-[0_4px_28px_rgba(15,23,42,0.10)]"
+          style={{ maxWidth: '1680px' }}
+        >
+          {/* ---- Judul dokumen ---- */}
+          <div className="grid grid-cols-[300px_1fr_260px] border-b-2 border-gray-900">
+            <div className="border-r-2 border-gray-900 p-4">
+              <span className="font-bold text-[13px]">Nomor SIKA :</span>
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <div className="border border-gray-500 bg-gray-50 px-2.5 py-1.5 text-[11px] text-center flex-1 truncate">
+                  {sika?.noSikaAreaFungsi || '-'}
                 </div>
-                <div className="mt-2.5 flex items-center gap-1.5 text-[11px]">
-                  <span className="shrink-0 text-gray-600">Lanjutan dari SIKA No</span>
-                  <span className="border-b border-gray-400 flex-1 text-center font-medium">
-                    {sika?.lanjutanDariSika || ''}
-                  </span>
+                <span className="text-[11px]">-</span>
+                <div className="border border-gray-500 bg-gray-50 px-2.5 py-1.5 text-[11px] text-center flex-1 truncate">
+                  {sika?.noSikaNomorUrut || '-'}
                 </div>
               </div>
-              <div className="flex flex-col items-center justify-center py-3">
-                <h1 className="font-bold text-xl tracking-wide text-center">SURAT IZIN KERJA AMAN</h1>
-                <span className="text-sm font-bold tracking-widest mt-0.5">( SIKA )</span>
-              </div>
-              <div className="flex items-center justify-center p-3">
-                <img src="/logopertaminagasfull.svg" alt="Pertamina Gas" className="h-10 object-contain" />
+              <div className="mt-2.5 flex items-center gap-1.5 text-[11px]">
+                <span className="shrink-0 text-gray-600">Lanjutan dari SIKA No</span>
+                <span className="border-b border-gray-400 flex-1 text-center font-medium">
+                  {sika?.lanjutanDariSika || ''}
+                </span>
               </div>
             </div>
-
-            {/* ---- Bagian 1: tanggal terbit / jam kerja / berlaku hingga ---- */}
-            <div className="flex items-center gap-8 flex-wrap border-b-2 border-gray-900 px-4 py-3 bg-gray-50">
-              <span className="font-bold text-[12px]">BAGIAN 1 - TANGGAL TERBIT</span>
-              <DateBoxes digits={sika?.tanggalTerbit} />
-              <span className="font-bold text-[12px] ml-2">JAM KERJA</span>
-              <span className="text-[12px]">{sika?.jamKerjaMulai || '-'} s/d {sika?.jamKerjaSelesai || '-'}</span>
-              <span className="font-bold text-[12px] ml-2">W.I</span>
-              <span className="text-[12px]">{sika?.waktuIsolasi || '-'}</span>
-              <span className="font-bold text-[12px] ml-auto">BERLAKU HINGGA</span>
-              <DateBoxes digits={sika?.berlakuHingga} />
+            <div className="flex flex-col items-center justify-center py-3">
+              <h1 className="font-bold text-xl tracking-wide text-center">SURAT IZIN KERJA AMAN</h1>
+              <span className="text-sm font-bold tracking-widest mt-0.5">( SIKA )</span>
             </div>
+            <div className="flex items-center justify-center p-3">
+              <img src="/logopertaminagasfull.svg" alt="Pertamina Gas" className="h-10 object-contain" />
+            </div>
+          </div>
 
-            {/* ---- Body utama: kolom kiri (rail berwarna) + kolom kanan (formulir) ---- */}
-            <div className="grid grid-cols-[1fr_320px]">
-              {/* ===================== KOLOM KIRI ===================== */}
-              <div className="border-r-2 border-gray-900">
+          {/* ---- Bagian 1 ---- */}
+          <div className="flex items-center gap-8 flex-wrap border-b-2 border-gray-900 px-4 py-3 bg-gray-50">
+            <span className="font-bold text-[12px]">BAGIAN 1 - TANGGAL TERBIT</span>
+            <DateBoxes digits={sika?.tanggalTerbit} />
+            <span className="font-bold text-[12px] ml-2">JAM KERJA</span>
+            <span className="text-[12px]">{sika?.jamKerjaMulai || '-'} s/d {sika?.jamKerjaSelesai || '-'}</span>
+            <span className="font-bold text-[12px] ml-2">W.I</span>
+            <span className="text-[12px]">{sika?.waktuIsolasi || '-'}</span>
+            <span className="font-bold text-[12px] ml-auto">BERLAKU HINGGA</span>
+            <DateBoxes digits={sika?.berlakuHingga} />
+          </div>
 
-                {/* --- Rail: PROGRAM --- */}
-                <div className="flex">
-                  <SectionRail color="#334155" text="PROGRAM" />
-                  <div className="flex-1">
-                    <SectionHeader
-                      title="DATA PROGRAM / KONTRAK"
-                      right={<EditLink onClick={() => router.push('/dashboard/pemohon/program/new')} />}
+          {/* ---- Body utama ---- */}
+          <div className="grid grid-cols-[1fr_320px]">
+            <div className="border-r-2 border-gray-900">
+              {/* Program */}
+              <div className="flex">
+                <SectionRail color="#334155" text="PROGRAM" />
+                <div className="flex-1">
+                  <SectionHeader title="DATA PROGRAM / KONTRAK" />
+                  <div className="p-4 grid grid-cols-2 gap-x-10 gap-y-1.5">
+                    <FormField label="Lokasi Kerja" value={program?.lokasiKerja} labelWidth="w-52" />
+                    <FormField label="Nama Paket Pekerjaan" value={program?.namaPaket} labelWidth="w-52" />
+                    <FormField label="No Kontrak" value={program?.noKontrak} labelWidth="w-52" />
+                    <FormField label="Tanggal Kontrak" value={program?.tanggalKontrak} labelWidth="w-52" />
+                    <FormField label="Fungsi (Penanggung Jawab Pekerjaan)" value={program?.satKerjaPemberi} labelWidth="w-52" />
+                    <FormField label="Fungsi (Penanggung Jawab Aset)" value={program?.satKerjaPenanggung} labelWidth="w-52" />
+                    <FormField label="Fungsi IA (Issuing Authority)" value={program?.fungsiIA} labelWidth="w-52" />
+                    <FormField
+                      label="Pelaksana (Penanggung Jawab Aset)"
+                      value={`${program?.pelaksanaPerusahaan || '-'} (${program?.pelaksanaJenis || '-'})`}
+                      labelWidth="w-52"
                     />
-                    <div className="p-4 grid grid-cols-2 gap-x-10 gap-y-1.5">
-                      <FormField label="Lokasi Kerja" value={program?.lokasiKerja} labelWidth="w-52" />
-                      <FormField label="Nama Paket Pekerjaan" value={program?.namaPaket} labelWidth="w-52" />
-                      <FormField label="No Kontrak" value={program?.noKontrak} labelWidth="w-52" />
-                      <FormField label="Tanggal Kontrak" value={program?.tanggalKontrak} labelWidth="w-52" />
-                      <FormField label="Fungsi (Penanggung Jawab Pekerjaan)" value={program?.satKerjaPemberi} labelWidth="w-52" />
-                      <FormField label="Fungsi (Penanggung Jawab Aset)" value={program?.satKerjaPenanggung} labelWidth="w-52" />
-                      <FormField label="Fungsi IA (Issuing Authority)" value={program?.fungsiIA} labelWidth="w-52" />
-                      <FormField
-                        label="Pelaksana (Penanggung Jawab Aset)"
-                        value={`${program?.pelaksanaPerusahaan || '-'} (${program?.pelaksanaJenis || '-'})`}
-                        labelWidth="w-52"
-                      />
+                  </div>
+                  <div className="grid grid-cols-3 gap-6 px-4 pb-4">
+                    <div>
+                      <span className="block text-[11px] font-semibold text-gray-600 mb-1">PA / PIC (Pemberi Kerja)</span>
+                      <CheckList items={program?.picPemberiList?.filter(Boolean)} columns={1} />
                     </div>
-                    <div className="grid grid-cols-3 gap-6 px-4 pb-4">
-                      <div>
-                        <span className="block text-[11px] font-semibold text-gray-600 mb-1">PA / PIC (Pemberi Kerja)</span>
-                        <CheckList items={program?.picPemberiList?.filter(Boolean)} columns={1} />
-                      </div>
-                      <div>
-                        <span className="block text-[11px] font-semibold text-gray-600 mb-1">Pimpinan Pelaksana (PPA)</span>
-                        <CheckList items={program?.pimpinanPelaksanaList?.filter(Boolean)} columns={1} />
-                      </div>
-                      <div>
-                        <span className="block text-[11px] font-semibold text-gray-600 mb-1">PIC IA (Penanggung Jawab Aset)</span>
-                        <CheckList items={program?.picPenanggungList?.filter(Boolean)} columns={1} />
-                      </div>
+                    <div>
+                      <span className="block text-[11px] font-semibold text-gray-600 mb-1">Pimpinan Pelaksana (PPA)</span>
+                      <CheckList items={program?.pimpinanPelaksanaList?.filter(Boolean)} columns={1} />
+                    </div>
+                    <div>
+                      <span className="block text-[11px] font-semibold text-gray-600 mb-1">PIC IA (Penanggung Jawab Aset)</span>
+                      <CheckList items={program?.picPenanggungList?.filter(Boolean)} columns={1} />
                     </div>
                   </div>
                 </div>
+              </div>
 
-                {/* --- Rail: PERMINTAAN (Bagian 2 - Jenis Pekerjaan) --- */}
-                <div className="flex border-t-2 border-gray-900">
-                  <SectionRail color="#2563eb" text="PERMINTAAN" />
-                  <div className="flex-1">
-                    <SectionHeader
-                      title="BAGIAN 2 - JENIS PEKERJAAN"
-                      right={<span className="text-[10px] text-red-600 font-semibold">Diisi oleh Pelaksana Pekerjaan (PA)</span>}
-                    />
-                    <div className="p-4 grid grid-cols-2 gap-x-10 gap-y-1.5">
-                      <FormField label="Fungsi / Perusahaan" value={sika?.fungsiPerusahaan} />
-                      <FormField label="Lokasi / Instalasi" value={sika?.lokasiInstalasi} />
-                      <FormField label="Peralatan / No. Identitas" value={sika?.peralatanNoIdentitas} />
-                      <FormField label="Jumlah Pekerja" value={`${sika?.pekerjaList?.length || 0} orang`} />
+              {/* Jenis Pekerjaan */}
+              <div className="flex border-t-2 border-gray-900">
+                <SectionRail color="#2563eb" text="PERMINTAAN" />
+                <div className="flex-1">
+                  <SectionHeader
+                    title="BAGIAN 2 - JENIS PEKERJAAN"
+                    right={<span className="text-[10px] text-red-600 font-semibold">Diisi oleh Pelaksana Pekerjaan (PA)</span>}
+                  />
+                  <div className="p-4 grid grid-cols-2 gap-x-10 gap-y-1.5">
+                    <FormField label="Fungsi / Perusahaan" value={sika?.fungsiPerusahaan} />
+                    <FormField label="Lokasi / Instalasi" value={sika?.lokasiInstalasi} />
+                    <FormField label="Peralatan / No. Identitas" value={sika?.peralatanNoIdentitas} />
+                    <FormField label="Jumlah Pekerja" value={`${sika?.pekerjaList?.length || 0} orang`} />
+                  </div>
+                  <div className="px-4 pb-3">
+                    <FormField label="Uraian Pekerjaan" value={sika?.uraianPekerjaan} />
+                    <FormField label="Peralatan yang digunakan" value={sika?.peralatanDigunakan} />
+                  </div>
+                  {!!sika?.pekerjaList?.length && (
+                    <div className="px-4 pb-4">
+                      <span className="block text-[11px] font-semibold text-gray-600 mb-1">Nama Pekerja</span>
+                      <CheckList items={sika.pekerjaList} columns={3} />
                     </div>
-                    <div className="px-4 pb-3">
-                      <FormField label="Uraian Pekerjaan" value={sika?.uraianPekerjaan} />
-                      <FormField label="Peralatan yang digunakan" value={sika?.peralatanDigunakan} />
-                    </div>
-                    {!!sika?.pekerjaList?.length && (
-                      <div className="px-4 pb-4">
-                        <span className="block text-[11px] font-semibold text-gray-600 mb-1">Nama Pekerja</span>
-                        <CheckList items={sika.pekerjaList} columns={3} />
+                  )}
+                </div>
+              </div>
+
+              {/* Pemeriksaan */}
+              <div className="flex border-t-2 border-gray-900">
+                <SectionRail color="#ca8a04" text="PERSIAPAN" />
+                <div className="flex-1">
+                  <SectionHeader
+                    title="BAGIAN 3 - PEMERIKSAAN"
+                    right={
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${sika?.diisiPA ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
+                          {sika?.diisiPA ? '✓' : '—'} Diisi PA
+                        </span>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${sika?.diperiksaIA ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
+                          {sika?.diperiksaIA ? '✓' : '—'} Diperiksa IA
+                        </span>
                       </div>
+                    }
+                  />
+                  <div className="p-4 grid grid-cols-2 gap-x-10 gap-y-4">
+                    <div>
+                      <span className="block text-[11px] font-semibold text-gray-600 mb-1">Isolasi Peralatan</span>
+                      <FullCheckList options={ISOLASI_OPTIONS} selected={sika?.isolasi} columns={2} />
+                    </div>
+                    <div>
+                      <span className="block text-[11px] font-semibold text-gray-600 mb-1">Lampiran (Mandatory)</span>
+                      <FullCheckList options={LAMPIRAN_OPTIONS} selected={sika?.lampiran} columns={3} />
+                    </div>
+                  </div>
+                  <div className="px-4 pb-3">
+                    <span className="block text-[11px] font-semibold text-gray-600 mb-1">Identifikasi Bahaya</span>
+                    <FullCheckList options={IDENTIFIKASI_OPTIONS} selected={sika?.identifikasi} columns={4} />
+                    {sika?.identifikasiTambahan && (
+                      <div className="mt-1.5"><FormField label="Identifikasi Tambahan" value={sika.identifikasiTambahan} /></div>
+                    )}
+                  </div>
+                  <div className="px-4 pb-4">
+                    <span className="block text-[11px] font-semibold text-gray-600 mb-1">Pengendalian Bahaya</span>
+                    <FullCheckList options={PENGENDALIAN_OPTIONS} selected={sika?.pengendalian} columns={3} />
+                    {sika?.permintaanTambahan && (
+                      <div className="mt-1.5"><FormField label="Permintaan Tambahan" value={sika.permintaanTambahan} /></div>
                     )}
                   </div>
                 </div>
+              </div>
 
-                {/* --- Rail: PERSIAPAN (Bagian 3 - Pemeriksaan) --- */}
-                <div className="flex border-t-2 border-gray-900">
-                  <SectionRail color="#ca8a04" text="PERSIAPAN" />
-                  <div className="flex-1">
-                    <SectionHeader
-                      title="BAGIAN 3 - PEMERIKSAAN"
-                      right={
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${sika?.diisiPA ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
-                            {sika?.diisiPA ? '✓' : '—'} Diisi PA
-                          </span>
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${sika?.diperiksaIA ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
-                            {sika?.diperiksaIA ? '✓' : '—'} Diperiksa IA
-                          </span>
-                        </div>
-                      }
-                    />
-                    <div className="p-4 grid grid-cols-2 gap-x-10 gap-y-4">
-                      <div>
-                        <span className="block text-[11px] font-semibold text-gray-600 mb-1">Isolasi Peralatan</span>
-                        <FullCheckList options={ISOLASI_OPTIONS} selected={sika?.isolasi} columns={2} />
-                      </div>
-                      <div>
-                        <span className="block text-[11px] font-semibold text-gray-600 mb-1">Lampiran (Mandatory)</span>
-                        <FullCheckList options={LAMPIRAN_OPTIONS} selected={sika?.lampiran} columns={3} />
-                      </div>
-                    </div>
-                    <div className="px-4 pb-3">
-                      <span className="block text-[11px] font-semibold text-gray-600 mb-1">Identifikasi Bahaya</span>
-                      <FullCheckList options={IDENTIFIKASI_OPTIONS} selected={sika?.identifikasi} columns={4} />
-                      {sika?.identifikasiTambahan && (
-                        <div className="mt-1.5"><FormField label="Identifikasi Tambahan" value={sika.identifikasiTambahan} /></div>
-                      )}
-                    </div>
-                    <div className="px-4 pb-4">
-                      <span className="block text-[11px] font-semibold text-gray-600 mb-1">Pengendalian Bahaya</span>
-                      <FullCheckList options={PENGENDALIAN_OPTIONS} selected={sika?.pengendalian} columns={3} />
-                      {sika?.permintaanTambahan && (
-                        <div className="mt-1.5"><FormField label="Permintaan Tambahan" value={sika.permintaanTambahan} /></div>
-                      )}
-                    </div>
+              {/* JSA */}
+              <div className="flex border-t-2 border-gray-900">
+                <SectionRail color="#16a34a" text="PELAKSANAAN" />
+                <div className="flex-1">
+                  <SectionHeader title="BAGIAN 4 - JOB SAFETY ANALYSIS (JSA)" />
+                  <div className="p-4 grid grid-cols-2 gap-x-10 gap-y-1.5">
+                    <FormField label="No. SIKA" value={jsa?.jsaNo} />
+                    <FormField label="Judul Pekerjaan" value={jsa?.judulPekerjaan} />
+                    <FormField label="Tanggal" value={jsa?.tanggalJSA} />
+                    <FormField label="Lokasi" value={jsa?.lokasi} />
+                    <FormField label="Halaman" value={jsa?.halaman ? `${jsa.halaman} dari ${jsa.totalHalaman}` : undefined} />
+                    <FormField label="Status" value={jsa?.status === 'revisi' ? 'Revisi' : jsa?.status === 'baru' ? 'Baru' : undefined} />
                   </div>
-                </div>
 
-                {/* --- Rail: PELAKSANAAN (Bagian 4 - JSA) --- */}
-                <div className="flex border-t-2 border-gray-900">
-                  <SectionRail color="#16a34a" text="PELAKSANAAN" />
-                  <div className="flex-1">
-                    <SectionHeader
-                      title="BAGIAN 4 - JOB SAFETY ANALYSIS (JSA)"
-                      right={<EditLink onClick={() => router.push('/dashboard/pemohon/jsa/new')} />}
-                    />
-                    <div className="p-4 grid grid-cols-2 gap-x-10 gap-y-1.5">
-                      <FormField label="No. SIKA" value={jsa?.jsaNo} />
-                      <FormField label="Judul Pekerjaan" value={jsa?.judulPekerjaan} />
-                      <FormField label="Tanggal" value={jsa?.tanggalJSA} />
-                      <FormField label="Lokasi" value={jsa?.lokasi} />
-                      <FormField label="Halaman" value={jsa?.halaman ? `${jsa.halaman} dari ${jsa.totalHalaman}` : undefined} />
-                      <FormField label="Status" value={jsa?.status === 'revisi' ? 'Revisi' : jsa?.status === 'baru' ? 'Baru' : undefined} />
-                    </div>
+                  <div className="px-4 pb-4">
+                    <span className="block text-[11px] font-semibold text-blue-900 uppercase mb-1.5">Langkah Kerja</span>
+                    {hasLangkahKerja ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-[11px] border-collapse">
+                          <thead>
+                            <tr className="bg-blue-50">
+                              <th className="border border-gray-400 px-1 py-1 w-6">No</th>
+                              <th className="border border-gray-400 px-2 py-1 text-left">Langkah Pekerjaan</th>
+                              <th className="border border-gray-400 px-2 py-1 text-left">Peralatan/Material</th>
+                              <th className="border border-gray-400 px-2 py-1 text-left">Potensi Bahaya</th>
+                              <th className="border border-gray-400 px-2 py-1">Tingkat Risiko</th>
+                              <th className="border border-gray-400 px-2 py-1 text-left">Mitigasi</th>
+                              <th className="border border-gray-400 px-2 py-1 text-left">Penanggungjawab</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {jsa?.sections?.map((sec) => (
+                              <Fragment key={sec.key}>
+                                <tr className="bg-blue-100">
+                                  <td className="border border-gray-400 px-1 py-1 text-center font-bold">{sec.key}</td>
+                                  <td colSpan={6} className="border border-gray-400 px-2 py-1 font-bold uppercase">{sec.label}</td>
+                                </tr>
+                                {sec.rows
+                                  .filter((r) => r.langkah.trim() !== '' || r.potensiBahaya.trim() !== '')
+                                  .map((row, i) => {
+                                    const risk = getRiskBadgeStyle(row.tingkatRisiko);
+                                    return (
+                                      <tr key={row.id}>
+                                        <td className="border border-gray-400 px-1 py-1 text-center text-gray-400">{i + 1}</td>
+                                        <td className="border border-gray-400 px-2 py-1">{row.langkah || '-'}</td>
+                                        <td className="border border-gray-400 px-2 py-1">{row.peralatan || '-'}</td>
+                                        <td className="border border-gray-400 px-2 py-1">{row.potensiBahaya || '-'}</td>
+                                        <td className="border border-gray-400 px-2 py-1 text-center">
+                                          <span
+                                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                                            style={{ background: risk.bg, color: risk.text }}
+                                          >
+                                            {row.tingkatRisiko || '-'}
+                                          </span>
+                                        </td>
+                                        <td className="border border-gray-400 px-2 py-1">{row.mitigasi || '-'}</td>
+                                        <td className="border border-gray-400 px-2 py-1">{row.penanggungjawab || '-'}</td>
+                                      </tr>
+                                    );
+                                  })}
+                              </Fragment>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <span className="text-gray-400 text-xs italic">Belum diisi</span>
+                    )}
+                  </div>
 
-                    <div className="px-4 pb-4">
-                      <span className="block text-[11px] font-semibold text-blue-900 uppercase mb-1.5">Langkah Kerja</span>
-                      {hasLangkahKerja ? (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-[11px] border-collapse">
-                            <thead>
-                              <tr className="bg-blue-50">
-                                <th className="border border-gray-400 px-1 py-1 w-6">No</th>
-                                <th className="border border-gray-400 px-2 py-1 text-left">Langkah Pekerjaan</th>
-                                <th className="border border-gray-400 px-2 py-1 text-left">Peralatan/Material</th>
-                                <th className="border border-gray-400 px-2 py-1 text-left">Potensi Bahaya</th>
-                                <th className="border border-gray-400 px-2 py-1">Tingkat Risiko</th>
-                                <th className="border border-gray-400 px-2 py-1 text-left">Mitigasi</th>
-                                <th className="border border-gray-400 px-2 py-1 text-left">Penanggungjawab</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {jsa?.sections?.map((sec) => (
-                                <Fragment key={sec.key}>
-                                  <tr className="bg-blue-100">
-                                    <td className="border border-gray-400 px-1 py-1 text-center font-bold">{sec.key}</td>
-                                    <td colSpan={6} className="border border-gray-400 px-2 py-1 font-bold uppercase">{sec.label}</td>
-                                  </tr>
-                                  {sec.rows
-                                    .filter((r) => r.langkah.trim() !== '' || r.potensiBahaya.trim() !== '')
-                                    .map((row, i) => {
-                                      const risk = getRiskBadgeStyle(row.tingkatRisiko);
-                                      return (
-                                        <tr key={row.id}>
-                                          <td className="border border-gray-400 px-1 py-1 text-center text-gray-400">{i + 1}</td>
-                                          <td className="border border-gray-400 px-2 py-1">{row.langkah || '-'}</td>
-                                          <td className="border border-gray-400 px-2 py-1">{row.peralatan || '-'}</td>
-                                          <td className="border border-gray-400 px-2 py-1">{row.potensiBahaya || '-'}</td>
-                                          <td className="border border-gray-400 px-2 py-1 text-center">
-                                            <span
-                                              className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
-                                              style={{ background: risk.bg, color: risk.text }}
-                                            >
-                                              {row.tingkatRisiko || '-'}
-                                            </span>
-                                          </td>
-                                          <td className="border border-gray-400 px-2 py-1">{row.mitigasi || '-'}</td>
-                                          <td className="border border-gray-400 px-2 py-1">{row.penanggungjawab || '-'}</td>
-                                        </tr>
-                                      );
-                                    })}
-                                </Fragment>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : (
-                        <span className="text-gray-400 text-xs italic">Belum diisi</span>
-                      )}
-                    </div>
-
-                    <div className="px-4 pb-4 pt-3 border-t border-dashed border-gray-300">
-                      <span className="block text-[11px] font-semibold text-gray-600 mb-1">Peralatan Pelindung (APD) Digunakan</span>
-                      <FullCheckList options={PPE_OPTIONS} selected={jsa?.checkedPPE} columns={4} />
-                    </div>
+                  <div className="px-4 pb-4 pt-3 border-t border-dashed border-gray-300">
+                    <span className="block text-[11px] font-semibold text-gray-600 mb-1">Peralatan Pelindung (APD) Digunakan</span>
+                    <FullCheckList options={PPE_OPTIONS} selected={jsa?.checkedPPE} columns={4} />
                   </div>
                 </div>
               </div>
+            </div>
 
-              {/* ===================== KOLOM KANAN: FORMULIR SIKA ===================== */}
-              <div className="bg-sky-50 flex flex-col">
-                <div className="bg-sky-500 text-white text-center font-bold text-sm py-2 tracking-wide">
-                  FORMULIR SIKA
-                </div>
-
-                <div className="p-4">
-                  <FullCheckList options={SERTIFIKAT_OPTIONS} selected={sika?.sertifikat} columns={1} />
-
-                  <span className="block text-[11px] font-bold underline mt-4 mb-2">Sifat Pekerjaan</span>
-                  <div className="space-y-1">
-                    {SIFAT_OPTIONS.map((sifat) => {
-                      const active = sika?.sifatPekerjaan === sifat;
-                      return (
-                        <div key={sifat} className="flex items-center gap-1.5 text-[11px]">
-                          <span
-                            className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
-                              active ? 'bg-blue-600 border-blue-600' : 'border-gray-500 bg-white'
-                            }`}
-                          >
-                            {active && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
-                          </span>
-                          <span className={sifat === 'Emergency' ? 'text-red-600 font-semibold' : 'text-gray-800'}>
-                            {sifat}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
+            {/* KOLOM KANAN: FORMULIR SIKA */}
+            <div className="bg-sky-50 flex flex-col">
+              <div className="bg-sky-500 text-white text-center font-bold text-sm py-2 tracking-wide">
+                FORMULIR SIKA
+              </div>
+              <div className="p-4">
+                <FullCheckList options={SERTIFIKAT_OPTIONS} selected={sika?.sertifikat} columns={1} />
+                <span className="block text-[11px] font-bold underline mt-4 mb-2">Sifat Pekerjaan</span>
+                <div className="space-y-1">
+                  {SIFAT_OPTIONS.map((sifat) => {
+                    const active = sika?.sifatPekerjaan === sifat;
+                    return (
+                      <div key={sifat} className="flex items-center gap-1.5 text-[11px]">
+                        <span
+                          className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
+                            active ? 'bg-blue-600 border-blue-600' : 'border-gray-500 bg-white'
+                          }`}
+                        >
+                          {active && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                        </span>
+                        <span className={sifat === 'Emergency' ? 'text-red-600 font-semibold' : 'text-gray-800'}>
+                          {sifat}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* ===================== DETAIL SERTIFIKAT KERJA ===================== */}
-          {/* Setiap sertifikat dapat "wadah" & ref sendiri, jadi masing- */}
-          {/* masing jadi halaman PDF tersendiri, tidak nyatu ke SIKA atau */}
-          {/* ke sertifikat lain. */}
-          {sika?.sertifikat?.map((nama) => (
-            <div
-              key={nama}
-              ref={(el) => { certRefs.current[nama] = el; }}
-              className="mx-auto w-full bg-white border-2 border-gray-900 text-[13px] text-gray-800 shadow-[0_4px_28px_rgba(15,23,42,0.10)]"
-              style={{ maxWidth: '1680px' }}
-            >
+          {/* DETAIL SERTIFIKAT KERJA */}
+          {!!sika?.sertifikat?.length && (
+            <div>
               <div className="bg-gray-900 px-4 py-2.5">
                 <span className="text-white text-[12px] font-bold tracking-widest uppercase">
-                  Detail Sertifikat Kerja — {nama}
+                  Detail Sertifikat Kerja
                 </span>
               </div>
-              <SertifikatDetailCard nama={nama} record={sertifikatData?.[nama]} sika={sika} />
+              {sika.sertifikat.map((nama) => (
+                <SertifikatDetailCard key={nama} nama={nama} record={sertifikatData?.[nama]} sika={sika} />
+              ))}
             </div>
-          ))}
+          )}
         </div>
-
       </div>
 
-      {/* Catatan opsional untuk Pemberi Kerja, khusus alur revalidasi-dengan-perubahan */}
-      {isRevalidasiUpdate && !perubahanMenunggu && (
-        <div className="px-6 pb-3 bg-gray-100 flex justify-end">
-          <div className="w-full max-w-md">
-            <label className="text-[11px] font-semibold text-gray-500 block mb-1">
-              Catatan untuk Pemberi Kerja (opsional)
-            </label>
-            <textarea
-              value={catatanRevalidasi}
-              onChange={(e) => setCatatanRevalidasi(e.target.value)}
-              rows={2}
-              placeholder="Jelaskan perubahan yang diajukan, mis. penambahan sertifikat/pekerja baru..."
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-300 resize-none bg-white"
-            />
+      {/* ================= STATUS PJA (tanpa tombol approval) ================= */}
+      <div className="px-4 sm:px-8 lg:px-14 xl:px-20 pb-8">
+        <div
+          className="mx-auto w-full bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden"
+          style={{ maxWidth: '1680px' }}
+        >
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2"
+            style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
+            <div className="flex items-center gap-3">
+              <FileText size={16} className="text-white/70" />
+              <div>
+                <span className="text-white font-bold text-xs tracking-wide">STATUS PENGAJUAN</span>
+                <p className="text-blue-200 text-[10px] mt-0.5">
+                  Ref. No. SIKA: <span className="font-semibold">{noSikaGabungan}</span>
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowHistory(true)}
+              className="flex items-center gap-1.5 rounded-full border border-white/20 text-white/80 hover:text-white hover:bg-white/10 text-[10px] font-semibold px-3 py-1.5 transition"
+            >
+              <History size={12} /> Riwayat
+            </button>
+          </div>
+
+          <div className="px-6 py-5 flex flex-wrap gap-6 items-center">
+            {/* Status SIKA */}
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium text-gray-500">SIKA:</span>
+              <StatusBadgePJA status={record.sikaStatusPJA} />
+            </div>
+
+            {/* Status JSA */}
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium text-gray-500">JSA:</span>
+              <StatusBadgePJA status={record.jsaStatusPJA} />
+            </div>
+
+            {/* Status Pemberi */}
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium text-gray-500">Status Pemberi:</span>
+              <StatusBadgePJA status={record.sikaStatusPemberi} />
+              <StatusBadgePJA status={record.jsaStatusPemberi} />
+            </div>
+
+            {/* Informasi tambahan */}
+            <div className="border-l border-gray-200 pl-4 flex items-center gap-3">
+              <span className="text-xs text-gray-400">
+                Diperbarui: {record.updatedAt ? new Date(record.updatedAt).toLocaleDateString('id-ID', {
+                  day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                }) : '-'}
+              </span>
+            </div>
+          </div>
+
+          {/* Catatan jika sudah selesai */}
+          {record.sikaStatusPJA === 'approved' && record.jsaStatusPJA === 'approved' && (
+            <div className="px-6 pb-4">
+              <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+                <CheckCircle size={16} className="text-green-600 shrink-0" />
+                <p className="text-xs text-green-700 font-medium">
+                  SIKA dan JSA telah disetujui oleh Penanggung Jawab Aset. Pengajuan ini <span className="font-bold">selesai</span>.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {record.sikaStatusPJA === 'rejected' && (
+            <div className="px-6 pb-4">
+              <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                <XCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs text-red-700 font-medium">Pengajuan ini ditolak oleh Penanggung Jawab Aset.</p>
+                  {(record.alasanTolakSikaPJA || record.alasanTolakJsaPJA) && (
+                    <p className="text-xs text-red-600 mt-1">
+                      Alasan: {record.alasanTolakSikaPJA || record.alasanTolakJsaPJA}
+                    </p>
+                  )}
+                  <p className="text-[10px] text-red-500 mt-1">Menunggu pemohon mengajukan ulang setelah revisi.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {record.sikaStatusPJA === 'waiting' && (
+            <div className="px-6 pb-4">
+              <div className="flex items-center gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3">
+                <Clock size={16} className="text-yellow-600 shrink-0" />
+                <p className="text-xs text-yellow-700 font-medium">
+                  Pengajuan ini sedang <span className="font-bold">dalam proses</span> review oleh Penanggung Jawab Aset.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {record.sikaStatusPJA === 'draft' && record.jsaStatusPJA === 'draft' && (
+            <div className="px-6 pb-4">
+              <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+                <Clock size={16} className="text-blue-600 shrink-0" />
+                <p className="text-xs text-blue-700 font-medium">
+                  Pengajuan ini <span className="font-bold">menunggu</span> review oleh Penanggung Jawab Aset.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ================= HISTORY MODAL ================= */}
+      {showHistory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[80vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between"
+              style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
+              <div>
+                <p className="text-white font-bold text-sm">Riwayat Approval</p>
+                <p className="text-blue-200 text-xs mt-0.5">SIKA, JSA &amp; Revalidasi &middot; Ref. {noSikaGabungan}</p>
+              </div>
+              <button
+                onClick={() => setShowHistory(false)}
+                className="w-7 h-7 hover:bg-white/20 rounded-full flex items-center justify-center transition text-white"
+              >
+                ×
+              </button>
+            </div>
+            <div className="px-6 py-4 overflow-y-auto flex-1">
+              {relevantHistory.length === 0 ? (
+                <p className="text-center text-gray-400 text-xs py-10">Belum ada riwayat aktivitas.</p>
+              ) : (
+                <div className="space-y-3">
+                  {relevantHistory.map((h) => {
+                    const aksiLabel = h.aksi === 'approve' ? 'Menyetujui' : h.aksi === 'reject' ? 'Menolak' : 'Mengajukan ulang';
+                    const aksiColor = h.aksi === 'approve' ? 'text-green-600' : h.aksi === 'reject' ? 'text-red-600' : 'text-blue-600';
+                    const dokumenLabel = h.dokumen === 'sika' ? 'SIKA' : h.dokumen === 'jsa' ? 'JSA' : h.dokumen === 'perubahan' ? 'Perubahan Data' : 'Revalidasi';
+                    return (
+                      <div key={h.id} className="border border-gray-100 rounded-lg px-3 py-2.5 bg-gray-50">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className={`text-xs font-semibold ${aksiColor}`}>
+                            {aksiLabel} {dokumenLabel}
+                          </span>
+                          <span className="text-[10px] text-gray-400">{formatTimestamp(h.timestamp)}</span>
+                        </div>
+                        <p className="text-xs text-gray-600">
+                          oleh <span className="font-medium">{h.oleh}</span>
+                          <span className="text-gray-400"> ({h.peran})</span>
+                        </p>
+                        {h.alasan && (
+                          <p className="text-xs text-gray-500 mt-1 italic">"{h.alasan}"</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
-
-      {/* ================= ACTION BUTTONS (tidak diubah) ================= */}
-      <div className="flex justify-end gap-2 pb-4 px-6 bg-gray-100">
-        {isRevalidasiUpdate ? (
-          <button
-            onClick={handleKirimRevalidasi}
-            disabled={perubahanMenunggu}
-            className="flex items-center gap-1.5 bg-green-500 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-green-200"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            {perubahanMenunggu ? 'Menunggu Persetujuan Pemberi' : 'Kirim Konfirmasi Revalidasi'}
-          </button>
-        ) : (
-          <button
-            onClick={handleRequestReview}
-            disabled={alreadySubmitted}
-            className="flex items-center gap-1.5 bg-green-500 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-green-200"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            {alreadySubmitted ? 'Sudah Diajukan' : 'Request Review'}
-          </button>
-        )}
-        <button
-          onClick={handleCopyJSA}
-          disabled={isExporting}
-          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-blue-200"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
-          {isExporting ? 'Mengexport...' : 'Copy JSA'}
-        </button>
-        <button
-          onClick={() => router.back()}
-          className="flex items-center gap-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-red-200"
-        >
-          <ChevronLeft size={14} /> Back
-        </button>
-      </div>
     </div>
   );
 }

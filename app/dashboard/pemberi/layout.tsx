@@ -1,9 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Menu, X, Home, FileText, ClipboardList, ChevronRight, LogOut, Settings, Bell } from 'lucide-react';
+import {
+  Menu, X, Home, FileText, ClipboardList, ChevronRight, LogOut, Settings, Bell,
+  CheckCircle2, XCircle, AlertTriangle, Info, Inbox, ArrowRight,
+} from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
+import { useProgramStore } from '@/store/programStore';
+import { getPemberiNotifications, type AppNotification, type NotifSeverity } from '@/lib/notifications';
 
 const navItems = [
   {
@@ -21,12 +26,62 @@ const navItems = [
   },
 ];
 
+const SEVERITY_STYLE: Record<NotifSeverity, { color: string; bg: string; icon: any }> = {
+  success: { color: '#00954E', bg: '#ECFDF5', icon: CheckCircle2 },
+  danger:  { color: '#DC2626', bg: '#FEF2F2', icon: XCircle },
+  warning: { color: '#B45309', bg: '#FFFBEB', icon: AlertTriangle },
+  info:    { color: '#0E76BC', bg: '#EFF6FF', icon: Info },
+};
+
+function formatClock(iso: string): string {
+  return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatFullDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
+}
+
+/** Kelompokkan notifikasi ke 3 keranjang waktu, urutan tetap terjaga (data
+ * yang masuk sudah disortir terbaru dulu oleh getPemberiNotifications). */
+function groupByDate(notifications: AppNotification[]) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+
+  const groups: { label: string; items: AppNotification[] }[] = [
+    { label: 'Hari Ini', items: [] },
+    { label: 'Kemarin', items: [] },
+    { label: 'Lebih Awal', items: [] },
+  ];
+
+  for (const n of notifications) {
+    const d = new Date(n.timestamp);
+    const dOnly = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    if (dOnly.getTime() === today.getTime()) groups[0].items.push(n);
+    else if (dOnly.getTime() === yesterday.getTime()) groups[1].items.push(n);
+    else groups[2].items.push(n);
+  }
+
+  return groups.filter((g) => g.items.length > 0);
+}
+
 export default function PemberiLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { user, isAuthenticated, isHydrated, logout } = useAuthStore();
+  const {
+    submissions,
+    approvalHistory,
+    readNotificationIds,
+    markNotificationRead,
+    markAllNotificationsRead,
+  } = useProgramStore();
+
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [notifTab, setNotifTab] = useState<'semua' | 'unread'>('semua');
+  const notifPanelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isHydrated && !isAuthenticated) {
@@ -34,9 +89,49 @@ export default function PemberiLayout({ children }: { children: React.ReactNode 
     }
   }, [isHydrated, isAuthenticated, router]);
 
+  useEffect(() => {
+    if (!notifOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNotifOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [notifOpen]);
+
+  const notifications = useMemo(
+    () => getPemberiNotifications(submissions, approvalHistory),
+    [submissions, approvalHistory]
+  );
+  const unreadCount = notifications.filter((n) => !readNotificationIds.includes(n.id)).length;
+
+  const visibleNotifications = useMemo(
+    () =>
+      notifTab === 'unread'
+        ? notifications.filter((n) => !readNotificationIds.includes(n.id))
+        : notifications,
+    [notifications, notifTab, readNotificationIds]
+  );
+  const groupedNotifications = useMemo(() => groupByDate(visibleNotifications), [visibleNotifications]);
+
   const handleLogout = () => {
     logout();
     router.push('/login');
+  };
+
+  // Beda dari sisi Pemohon: halaman Review Pemberi baca submission langsung
+  // dari URL param (/dashboard/pemberi/review/[id]), bukan dari
+  // activeSubmissionId di store — jadi cukup push ke situ, tidak perlu
+  // openSubmission dulu.
+  const handleOpenNotification = (n: AppNotification) => {
+    markNotificationRead(n.id);
+    setNotifOpen(false);
+    setSidebarOpen(false);
+    router.push(`/dashboard/pemberi/review/${n.submissionId}`);
+  };
+
+  const handleGoToApprovalManagement = () => {
+    setNotifOpen(false);
+    router.push('/dashboard/pemberi/approval-management');
   };
 
   if (!isHydrated) return null;
@@ -51,6 +146,15 @@ export default function PemberiLayout({ children }: { children: React.ReactNode 
         .pemberi-nav-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.08); border-radius: 10px; }
         .pemberi-nav-scroll::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.15); }
         .pemberi-nav-item:hover .pemberi-nav-icon { transform: scale(1.06); }
+
+        .pemberi-notif-scroll::-webkit-scrollbar { width: 5px; }
+        .pemberi-notif-scroll::-webkit-scrollbar-track { background: transparent; }
+        .pemberi-notif-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.10); border-radius: 10px; }
+
+        @keyframes pemberiNotifIn {
+          from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
       `}</style>
 
       {sidebarOpen && (
@@ -269,7 +373,205 @@ export default function PemberiLayout({ children }: { children: React.ReactNode 
           }}
         >
           <Bell size={18} />
+          {unreadCount > 0 && (
+            <span style={{
+              position: 'absolute', top: -3, right: -3,
+              minWidth: 16, height: 16, borderRadius: 8,
+              background: '#DC2626', color: '#fff',
+              fontSize: '0.6rem', fontWeight: 700,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '0 4px', border: '2px solid #f1f5f9',
+            }}>
+              {unreadCount > 9 ? '9+' : unreadCount}
+            </span>
+          )}
         </button>
+
+        {notifOpen && (
+          <>
+            <div
+              onClick={() => setNotifOpen(false)}
+              style={{ position: 'fixed', inset: 0, zIndex: -1 }}
+            />
+            <div
+              ref={notifPanelRef}
+              style={{
+                position: 'absolute', top: 46, right: 0, width: 380,
+                maxHeight: '78vh', display: 'flex', flexDirection: 'column',
+                background: '#ffffff', borderRadius: 16, border: '1px solid #e5e7eb',
+                boxShadow: '0 20px 48px rgba(15,23,42,0.16), 0 2px 8px rgba(15,23,42,0.06)',
+                overflow: 'hidden', animation: 'pemberiNotifIn 0.16s ease-out',
+              }}
+            >
+              {/* Header */}
+              <div style={{ padding: '16px 18px 12px', borderBottom: '1px solid #f1f5f9' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                  <div>
+                    <p style={{ margin: 0, fontWeight: 700, fontSize: '0.95rem', color: '#0f172a' }}>
+                      Notifikasi
+                    </p>
+                    <p style={{ margin: '2px 0 0', fontSize: '0.72rem', color: '#94a3b8' }}>
+                      {unreadCount > 0 ? `${unreadCount} belum dibaca` : 'Semua sudah dibaca'}
+                    </p>
+                  </div>
+                  {unreadCount > 0 && (
+                    <button
+                      onClick={() => markAllNotificationsRead(notifications.map((n) => n.id))}
+                      style={{
+                        background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8,
+                        cursor: 'pointer', color: '#334155', fontSize: '0.68rem', fontWeight: 600,
+                        padding: '6px 10px', whiteSpace: 'nowrap',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = '#f8fafc'; }}
+                    >
+                      Tandai semua dibaca
+                    </button>
+                  )}
+                </div>
+
+                {/* Tabs */}
+                <div style={{ display: 'flex', gap: 4, marginTop: 12, background: '#f1f5f9', padding: 3, borderRadius: 9 }}>
+                  {[
+                    { key: 'semua' as const, label: 'Semua', count: notifications.length },
+                    { key: 'unread' as const, label: 'Belum dibaca', count: unreadCount },
+                  ].map((t) => (
+                    <button
+                      key={t.key}
+                      onClick={() => setNotifTab(t.key)}
+                      style={{
+                        flex: 1, padding: '6px 8px', borderRadius: 7, border: 'none',
+                        cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                        background: notifTab === t.key ? '#ffffff' : 'transparent',
+                        color: notifTab === t.key ? '#0f172a' : '#64748b',
+                        boxShadow: notifTab === t.key ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                        transition: 'background 0.15s, color 0.15s',
+                      }}
+                    >
+                      {t.label}
+                      <span style={{
+                        fontSize: '0.62rem', fontWeight: 700,
+                        color: notifTab === t.key ? '#2563EB' : '#94a3b8',
+                        background: notifTab === t.key ? '#eff6ff' : '#e2e8f0',
+                        borderRadius: 6, padding: '0 5px', minWidth: 16, textAlign: 'center',
+                      }}>
+                        {t.count}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* List */}
+              <div className="pemberi-notif-scroll" style={{ overflowY: 'auto', flex: 1 }}>
+                {groupedNotifications.length === 0 ? (
+                  <div style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center',
+                    justifyContent: 'center', padding: '48px 20px', gap: 10,
+                  }}>
+                    <span style={{
+                      width: 44, height: 44, borderRadius: 12, background: '#f1f5f9',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8',
+                    }}>
+                      <Inbox size={20} />
+                    </span>
+                    <p style={{ margin: 0, fontSize: '0.78rem', fontWeight: 600, color: '#475569' }}>
+                      {notifTab === 'unread' ? 'Tidak ada notifikasi belum dibaca' : 'Belum ada notifikasi'}
+                    </p>
+                    <p style={{ margin: 0, fontSize: '0.7rem', color: '#94a3b8', textAlign: 'center', maxWidth: 220 }}>
+                      Pengajuan baru, revalidasi, dan pemulihan Suspend dari pemohon bakal muncul di sini.
+                    </p>
+                  </div>
+                ) : (
+                  groupedNotifications.map((group) => (
+                    <div key={group.label}>
+                      <p style={{
+                        margin: 0, padding: '10px 18px 6px',
+                        fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8',
+                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: '#fafbfc',
+                      }}>
+                        {group.label}
+                      </p>
+                      {group.items.map((n) => {
+                        const isRead = readNotificationIds.includes(n.id);
+                        const { color, bg, icon: Icon } = SEVERITY_STYLE[n.severity];
+                        return (
+                          <button
+                            key={n.id}
+                            onClick={() => handleOpenNotification(n)}
+                            title={formatFullDate(n.timestamp)}
+                            style={{
+                              width: '100%', display: 'flex', gap: 11, textAlign: 'left',
+                              padding: '11px 18px', border: 'none', borderBottom: '1px solid #f8fafc',
+                              background: isRead ? '#ffffff' : '#f8fbff', cursor: 'pointer',
+                              transition: 'background 0.12s',
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = isRead ? '#ffffff' : '#f8fbff'; }}
+                          >
+                            <span style={{
+                              width: 30, height: 30, borderRadius: 9, flexShrink: 0, marginTop: 1,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              background: bg, color,
+                            }}>
+                              <Icon size={15} />
+                            </span>
+                            <span style={{ flex: 1, minWidth: 0 }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{
+                                  fontSize: '0.79rem', fontWeight: isRead ? 500 : 700, color: '#0f172a',
+                                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                }}>
+                                  {n.title}
+                                </span>
+                                {!isRead && (
+                                  <span style={{
+                                    width: 6, height: 6, borderRadius: '50%',
+                                    background: '#2563EB', flexShrink: 0,
+                                  }} />
+                                )}
+                              </span>
+                              <span style={{
+                                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden', fontSize: '0.72rem', color: '#64748b',
+                                marginTop: 2, lineHeight: 1.45,
+                              }}>
+                                {n.message}
+                              </span>
+                              <span style={{ display: 'block', fontSize: '0.63rem', color: '#94a3b8', marginTop: 4, fontWeight: 500 }}>
+                                {formatClock(n.timestamp)}
+                              </span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Footer */}
+              <div style={{
+                padding: '10px 18px', borderTop: '1px solid #f1f5f9',
+                background: '#fafbfc',
+              }}>
+                <button
+                  onClick={handleGoToApprovalManagement}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                    color: '#2563EB', fontSize: '0.74rem', fontWeight: 600, padding: '4px 0',
+                  }}
+                >
+                  Lihat semua di Approval Management
+                  <ArrowRight size={13} />
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {children}

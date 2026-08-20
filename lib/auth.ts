@@ -23,7 +23,7 @@ export const DEMO_USERS: Array<User & { password: string }> = [
     id: '3',
     name: 'Ahmad Fauzi',
     email: 'pja@pgn.co.id',
-    password: 'admin123',
+    password: 'sika123',
     role: 'pja',
     jabatan: 'Super Admin',
     department: 'IT',

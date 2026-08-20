@@ -85,6 +85,7 @@ export default function SikaNewPage() {
   const berlakuHinggaPickerRef = useRef<HTMLInputElement>(null);
   const jamMulaiPickerRef = useRef<HTMLInputElement>(null);
   const jamSelesaiPickerRef = useRef<HTMLInputElement>(null);
+  const pekerjaInputRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   const openPicker = (ref: React.RefObject<HTMLInputElement | null>) => {
     const el = ref.current;
@@ -126,7 +127,15 @@ export default function SikaNewPage() {
     if (errors[field]) setErrors((prev) => ({ ...prev, [field]: '' }));
   };
 
-  const handleAddPekerja = () => setPekerjaList((prev) => [...prev, '']);
+  const handleAddPekerja = () => {
+    setPekerjaList((prev) => {
+      const next = [...prev, ''];
+      setTimeout(() => {
+        pekerjaInputRefs.current[next.length - 1]?.focus();
+      }, 0);
+      return next;
+    });
+  };
 
   const handlePekerjaChange = (index: number, value: string) => {
     setPekerjaList((prev) => prev.map((p, i) => (i === index ? value : p)));
@@ -168,7 +177,7 @@ export default function SikaNewPage() {
   });
 
   const inputClass = (field: string) =>
-    `flex-1 border rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 ${
+    `w-full border rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 ${
       errors[field]
         ? 'border-red-400 focus:ring-red-400'
         : 'border-gray-300 focus:ring-blue-400'
@@ -687,7 +696,14 @@ export default function SikaNewPage() {
                       type="text"
                       value={pekerja}
                       placeholder="Nama pekerja"
+                      ref={(el) => { pekerjaInputRefs.current[index] = el; }}
                       onChange={(e) => handlePekerjaChange(index, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddPekerja();
+                        }
+                      }}
                       className={`flex-1 border rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 ${
                         errors.pekerjaList && index === 0
                           ? 'border-red-400 focus:ring-red-400'

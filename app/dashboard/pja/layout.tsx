@@ -1,9 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Menu, X, Home, FileText, ClipboardList, Shield, ChevronRight, LogOut, Settings, Bell } from 'lucide-react';
+import {
+  Menu, X, Home, FileText, ClipboardList, ChevronRight, LogOut, Settings, Bell,
+  CheckCircle2, XCircle, AlertTriangle, Info, Inbox, ArrowRight, ShieldCheck,
+} from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
+import { useProgramStore } from '@/store/programStore';
+import { getPJANotifications, type AppNotification, type NotifSeverity } from '@/lib/notifications';
 
 const navItems = [
   {
@@ -13,26 +18,68 @@ const navItems = [
     ],
   },
   {
-    section: 'WORK PERMIT',
-    items: [
-      { icon: FileText, label: 'Daftar Work Permit', href: '/dashboard/pja/daftar-work-permit' },
-      { icon: ClipboardList, label: 'Review Work Permit', href: '/dashboard/pja/review-work-permit' },
-    ],
-  },
-  {
     section: 'REVIEW',
     items: [
-      { icon: Shield, label: 'Review JSA', href: '/dashboard/pja/review-jsa' },
-      { icon: FileText, label: 'Data Management', href: '/dashboard/pja/data-management' },
+      { icon: ClipboardList, label: 'Approval Management', href: '/dashboard/pja/approval-management' },
+      { icon: FileText, label: 'Audit Trail Persetujuan', href: '/dashboard/pja/audit_trailpersetujuan' },
     ],
   },
 ];
+
+const SEVERITY_STYLE: Record<NotifSeverity, { color: string; bg: string; icon: any }> = {
+  success: { color: '#00954E', bg: '#ECFDF5', icon: CheckCircle2 },
+  danger:  { color: '#DC2626', bg: '#FEF2F2', icon: XCircle },
+  warning: { color: '#B45309', bg: '#FFFBEB', icon: AlertTriangle },
+  info:    { color: '#0E76BC', bg: '#EFF6FF', icon: Info },
+};
+
+function formatClock(iso: string): string {
+  return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatFullDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
+}
+
+function groupByDate(notifications: AppNotification[]) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+
+  const groups: { label: string; items: AppNotification[] }[] = [
+    { label: 'Hari Ini', items: [] },
+    { label: 'Kemarin', items: [] },
+    { label: 'Lebih Awal', items: [] },
+  ];
+
+  for (const n of notifications) {
+    const d = new Date(n.timestamp);
+    const dOnly = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    if (dOnly.getTime() === today.getTime()) groups[0].items.push(n);
+    else if (dOnly.getTime() === yesterday.getTime()) groups[1].items.push(n);
+    else groups[2].items.push(n);
+  }
+
+  return groups.filter((g) => g.items.length > 0);
+}
 
 export default function PJALayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { user, isAuthenticated, isHydrated, logout } = useAuthStore();
+  const {
+    submissions,
+    approvalHistory,
+    readNotificationIds,
+    markNotificationRead,
+    markAllNotificationsRead,
+  } = useProgramStore();
+
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifTab, setNotifTab] = useState<'semua' | 'unread'>('semua');
+  const notifPanelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isHydrated && !isAuthenticated) {
@@ -40,212 +87,487 @@ export default function PJALayout({ children }: { children: React.ReactNode }) {
     }
   }, [isHydrated, isAuthenticated, router]);
 
+  useEffect(() => {
+    if (!notifOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNotifOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [notifOpen]);
+
+  const notifications = useMemo(
+    () => getPJANotifications(submissions, approvalHistory),
+    [submissions, approvalHistory]
+  );
+  const unreadCount = notifications.filter((n) => !readNotificationIds.includes(n.id)).length;
+
+  const visibleNotifications = useMemo(
+    () =>
+      notifTab === 'unread'
+        ? notifications.filter((n) => !readNotificationIds.includes(n.id))
+        : notifications,
+    [notifications, notifTab, readNotificationIds]
+  );
+  const groupedNotifications = useMemo(() => groupByDate(visibleNotifications), [visibleNotifications]);
+
   const handleLogout = () => {
     logout();
     router.push('/login');
+  };
+
+  const handleOpenNotification = (n: AppNotification) => {
+    markNotificationRead(n.id);
+    setNotifOpen(false);
+    setSidebarOpen(false);
+    if (n.title.includes('menunggu review PJA') || n.title.includes('Dokumen PJA') || n.title.includes('menunggu approval PJA')) {
+      router.push(`/dashboard/pja/approval-management`);
+    } else {
+      router.push(`/dashboard/pja/review/${n.submissionId}`);
+    }
+  };
+
+  const handleGoToApprovalManagement = () => {
+    setNotifOpen(false);
+    router.push('/dashboard/pja/approval-management');
   };
 
   if (!isHydrated) return null;
   if (!user) return null;
 
   return (
-    <div style={{ minHeight: '100vh' }}>
+    <div style={{ minHeight: '100vh', background: '#f1f5f9' }}>
 
-      {/* ─── SIDEBAR BACKDROP ─── */}
+      <style>{`
+        .pja-nav-scroll::-webkit-scrollbar { width: 5px; }
+        .pja-nav-scroll::-webkit-scrollbar-track { background: transparent; }
+        .pja-nav-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.08); border-radius: 10px; }
+        .pja-nav-scroll::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.15); }
+        .pja-nav-item:hover .pja-nav-icon { transform: scale(1.06); }
+
+        .pja-notif-scroll::-webkit-scrollbar { width: 5px; }
+        .pja-notif-scroll::-webkit-scrollbar-track { background: transparent; }
+        .pja-notif-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.10); border-radius: 10px; }
+
+        @keyframes pjaNotifIn {
+          from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+      `}</style>
+
       {sidebarOpen && (
         <div
           onClick={() => setSidebarOpen(false)}
           style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.45)',
-            zIndex: 40,
-            backdropFilter: 'blur(2px)',
+            position: 'fixed', inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.25)',
+            zIndex: 40, backdropFilter: 'blur(2px)',
+            transition: 'opacity 0.25s ease',
           }}
         />
       )}
 
-      {/* ─── SIDEBAR PANEL ─── */}
       <aside
         style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          height: '100vh',
-          width: '280px',
-          backgroundColor: '#0f2044',
-          zIndex: 50,
-          display: 'flex',
-          flexDirection: 'column',
-          transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
-          transition: 'transform 0.32s cubic-bezier(0.4, 0, 0.2, 1)',
-          boxShadow: sidebarOpen ? '4px 0 32px rgba(0,0,0,0.35)' : 'none',
+          position: 'fixed', top: 10, left: 10,
+          height: 'calc(100vh - 20px)', width: '276px',
+          background: '#ffffff',
+          zIndex: 50, display: 'flex', flexDirection: 'column',
+          borderRadius: 18, border: '1px solid #e5e7eb',
+          transform: sidebarOpen ? 'translateX(0)' : 'translateX(calc(-100% - 20px))',
+          transition: 'transform 0.36s cubic-bezier(0.32, 0.72, 0, 1)',
+          boxShadow: sidebarOpen ? '8px 0 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04)' : 'none',
+          overflow: 'hidden',
         }}
       >
-        {/* Header */}
         <div style={{
-          padding: '20px 20px 16px',
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          padding: '20px 18px 16px',
+          borderBottom: '1px solid #e5e7eb',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{
-              width: 36, height: 36, borderRadius: 8,
-              backgroundColor: '#2563EB',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontWeight: 900, color: '#fff', fontSize: '0.9rem',
-            }}>S</div>
-            <div>
-              <p style={{ color: '#fff', fontWeight: 700, fontSize: '0.9rem', margin: 0 }}>SIKA</p>
-              <p style={{ color: '#60a5fa', fontSize: '0.65rem', margin: 0 }}>Sistem Informasi Kerja</p>
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '11px' }}>
+            <img
+              src="/logopertaminagasfull.svg"
+              alt="Pertamina Gas"
+              style={{ height: 50, objectFit: 'contain' }}
+            />
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
             style={{
-              background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 6,
-              padding: '6px', cursor: 'pointer', color: '#94a3b8',
+              background: '#f1f5f9', border: 'none', borderRadius: 9,
+              padding: '7px', cursor: 'pointer', color: '#64748b',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'background 0.15s, color 0.15s, transform 0.15s',
             }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; e.currentTarget.style.transform = 'rotate(90deg)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#64748b'; e.currentTarget.style.transform = 'rotate(0deg)'; }}
           >
             <X size={16} />
           </button>
         </div>
 
-        {/* User Info */}
         <div style={{
-          padding: '16px 20px',
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          margin: '14px 14px 6px', padding: '12px 13px', borderRadius: 13,
+          background: '#f8fafc', border: '1px solid #e5e7eb',
           display: 'flex', alignItems: 'center', gap: '12px',
         }}>
-          <div style={{
-            width: 38, height: 38, borderRadius: '50%',
-            backgroundColor: '#1e3a6e',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#60a5fa', fontWeight: 700, fontSize: '0.85rem',
-            border: '2px solid #2563EB',
-          }}>
-            {user.name?.charAt(0) ?? 'U'}
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            <div style={{
+              width: 38, height: 38, borderRadius: '50%',
+              background: 'linear-gradient(160deg, #2563EB 0%, #1d4ed8 100%)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: '#fff', fontWeight: 700, fontSize: '0.85rem',
+              boxShadow: '0 0 0 2px #fff, 0 0 0 4px rgba(37,99,235,0.15)',
+            }}>
+              {user.name?.charAt(0) ?? 'U'}
+            </div>
+            <span style={{
+              position: 'absolute', bottom: -1, right: -1,
+              width: 10, height: 10, borderRadius: '50%',
+              background: '#22c55e', border: '2px solid #ffffff',
+            }} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ color: '#fff', fontSize: '0.82rem', fontWeight: 600, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <p style={{ color: '#0f172a', fontSize: '0.82rem', fontWeight: 600, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {user.name}
             </p>
-            <p style={{ color: '#64748b', fontSize: '0.7rem', margin: 0 }}>{user.jabatan}</p>
+            <p style={{ color: '#64748b', fontSize: '0.7rem', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {user.jabatan}
+            </p>
           </div>
-          <Bell size={15} color="#64748b" style={{ cursor: 'pointer', flexShrink: 0 }} />
         </div>
 
-        {/* Nav Items */}
-        <nav style={{ flex: 1, overflowY: 'auto', padding: '12px 0' }}>
+        <nav className="pja-nav-scroll" style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
           {navItems.map((group) => (
-            <div key={group.section} style={{ marginBottom: '4px' }}>
+            <div key={group.section} style={{ marginBottom: '8px' }}>
               <p style={{
-                color: '#334155', fontSize: '0.62rem', fontWeight: 700,
-                letterSpacing: '0.1em', padding: '8px 20px 4px', margin: 0,
+                color: '#94a3b8', fontSize: '0.6rem', fontWeight: 700,
+                letterSpacing: '0.12em', padding: '10px 22px 6px', margin: 0,
               }}>
                 {group.section}
               </p>
-              {group.items.map((item) => {
-                const isActive = pathname === item.href;
-                return (
-                  <button
-                    key={item.label}
-                    onClick={() => { setSidebarOpen(false); router.push(item.href); }}
-                    style={{
-                      width: '100%', display: 'flex', alignItems: 'center', gap: '12px',
-                      padding: '10px 20px',
-                      background: isActive ? 'rgba(37,99,235,0.18)' : 'transparent',
-                      border: 'none',
-                      borderLeft: isActive ? '3px solid #2563EB' : '3px solid transparent',
-                      cursor: 'pointer',
-                      color: isActive ? '#60a5fa' : '#94a3b8',
-                      fontSize: '0.83rem', fontWeight: isActive ? 600 : 400,
-                      textAlign: 'left', transition: 'all 0.15s',
-                    }}
-                    onMouseEnter={e => {
-                      if (!isActive) {
-                        e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.04)';
-                        e.currentTarget.style.color = '#e2e8f0';
-                      }
-                    }}
-                    onMouseLeave={e => {
-                      if (!isActive) {
-                        e.currentTarget.style.backgroundColor = 'transparent';
-                        e.currentTarget.style.color = '#94a3b8';
-                      }
-                    }}
-                  >
-                    <item.icon size={16} style={{ flexShrink: 0 }} />
-                    <span style={{ flex: 1 }}>{item.label}</span>
-                    {isActive && <ChevronRight size={13} />}
-                  </button>
-                );
-              })}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', padding: '0 12px' }}>
+                {group.items.map((item) => {
+                  const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+                  return (
+                    <button
+                      key={item.label}
+                      className="pja-nav-item"
+                      onClick={() => { setSidebarOpen(false); router.push(item.href); }}
+                      style={{
+                        width: '100%', display: 'flex', alignItems: 'center', gap: '12px',
+                        padding: '9px 12px', borderRadius: 11,
+                        background: isActive ? '#eff6ff' : 'transparent',
+                        boxShadow: isActive ? '0 0 0 1px #bfdbfe, 0 2px 8px rgba(37,99,235,0.08)' : 'none',
+                        border: 'none', cursor: 'pointer',
+                        color: isActive ? '#2563EB' : '#64748b',
+                        fontSize: '0.83rem', fontWeight: isActive ? 600 : 500,
+                        textAlign: 'left',
+                        transition: 'background 0.18s ease, color 0.18s ease, transform 0.18s ease',
+                      }}
+                      onMouseEnter={e => {
+                        if (!isActive) {
+                          e.currentTarget.style.background = '#f8fafc';
+                          e.currentTarget.style.color = '#0f172a';
+                          e.currentTarget.style.transform = 'translateX(2px)';
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (!isActive) {
+                          e.currentTarget.style.background = 'transparent';
+                          e.currentTarget.style.color = '#64748b';
+                          e.currentTarget.style.transform = 'translateX(0)';
+                        }
+                      }}
+                    >
+                      <span
+                        className="pja-nav-icon"
+                        style={{
+                          width: 28, height: 28, borderRadius: 8,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                          background: isActive ? 'linear-gradient(160deg, #2563EB 0%, #1d4ed8 100%)' : '#f1f5f9',
+                          color: isActive ? '#fff' : '#64748b',
+                          transition: 'transform 0.18s ease',
+                        }}
+                      >
+                        <item.icon size={15} />
+                      </span>
+                      <span style={{ flex: 1 }}>{item.label}</span>
+                      {isActive && <ChevronRight size={13} color="#2563EB" />}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           ))}
         </nav>
 
-        {/* Sidebar Footer */}
-        <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', padding: '12px 0' }}>
+        <div style={{ borderTop: '1px solid #e5e7eb', padding: '10px 12px 12px' }}>
           <button
             onClick={() => { setSidebarOpen(false); router.push('#'); }}
             style={{
               width: '100%', display: 'flex', alignItems: 'center', gap: '12px',
-              padding: '10px 20px', background: 'transparent', border: 'none',
-              cursor: 'pointer', color: '#94a3b8', fontSize: '0.83rem', textAlign: 'left',
-              transition: 'color 0.15s',
+              padding: '9px 12px', borderRadius: 11, background: 'transparent', border: 'none',
+              cursor: 'pointer', color: '#64748b', fontSize: '0.83rem', fontWeight: 500, textAlign: 'left',
+              transition: 'background 0.15s, color 0.15s',
             }}
-            onMouseEnter={e => (e.currentTarget.style.color = '#e2e8f0')}
-            onMouseLeave={e => (e.currentTarget.style.color = '#94a3b8')}
+            onMouseEnter={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#0f172a'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#64748b'; }}
           >
-            <Settings size={16} />
+            <span style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, background: '#f1f5f9', borderRadius: 8, color: '#64748b' }}>
+              <Settings size={15} />
+            </span>
             <span>Pengaturan</span>
           </button>
           <button
             onClick={handleLogout}
             style={{
               width: '100%', display: 'flex', alignItems: 'center', gap: '12px',
-              padding: '10px 20px', background: 'transparent', border: 'none',
-              cursor: 'pointer', color: '#f87171', fontSize: '0.83rem', textAlign: 'left',
-              transition: 'color 0.15s',
+              padding: '9px 12px', borderRadius: 11, background: 'transparent', border: 'none',
+              cursor: 'pointer', color: '#ef4444', fontSize: '0.83rem', fontWeight: 500, textAlign: 'left',
+              transition: 'background 0.15s, color 0.15s',
             }}
-            onMouseEnter={e => (e.currentTarget.style.color = '#fca5a5')}
-            onMouseLeave={e => (e.currentTarget.style.color = '#f87171')}
+            onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = '#dc2626'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#ef4444'; }}
           >
-            <LogOut size={16} />
+            <span style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, background: '#fef2f2', borderRadius: 8, color: '#ef4444' }}>
+              <LogOut size={15} />
+            </span>
             <span>Logout</span>
           </button>
         </div>
       </aside>
 
-      {/* ─── TRIGGER BUTTON (global, floating) ─── */}
       <button
         onClick={() => setSidebarOpen(true)}
         style={{
-          position: 'fixed',
-          top: 14,
-          left: 16,
-          zIndex: 30,
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          padding: '6px',
-          borderRadius: 6,
-          color: '#4b5563',
-          display: sidebarOpen ? 'none' : 'flex',
-          alignItems: 'center',
-          transition: 'background 0.15s',
+          position: 'fixed', top: 18, left: 16, zIndex: 30,
+          background: '#ffffff', border: '1px solid #e5e7eb', cursor: 'pointer',
+          padding: '8px', borderRadius: 9, color: '#475569',
+          display: sidebarOpen ? 'none' : 'flex', alignItems: 'center',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.07)',
+          transition: 'background 0.15s, box-shadow 0.15s, transform 0.15s',
         }}
-        onMouseEnter={e => (e.currentTarget.style.background = '#f3f4f6')}
-        onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+        onMouseEnter={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = '#ffffff'; e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.07)'; }}
       >
-        <Menu size={22} />
+        <Menu size={20} />
       </button>
 
-      {/* ─── PAGE CONTENT ─── */}
+      <div style={{ position: 'fixed', top: 20, right: 16, zIndex: 53 }}>
+        <button
+          onClick={() => setNotifOpen((v) => !v)}
+          aria-label="Notifikasi"
+          style={{
+            position: 'relative',
+            background: notifOpen ? '#eff6ff' : '#ffffff',
+            border: `1px solid ${notifOpen ? '#bfdbfe' : '#e5e7eb'}`,
+            cursor: 'pointer', padding: '8px', borderRadius: 9,
+            color: notifOpen ? '#2563EB' : '#475569',
+            display: 'flex', alignItems: 'center',
+            boxShadow: notifOpen ? '0 2px 8px rgba(37,99,235,0.15)' : '0 1px 3px rgba(0,0,0,0.07)',
+            transition: 'background 0.15s, box-shadow 0.15s, border-color 0.15s',
+          }}
+        >
+          <Bell size={18} />
+          {unreadCount > 0 && (
+            <span style={{
+              position: 'absolute', top: -3, right: -3,
+              minWidth: 16, height: 16, borderRadius: 8,
+              background: '#DC2626', color: '#fff',
+              fontSize: '0.6rem', fontWeight: 700,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '0 4px', border: '2px solid #f1f5f9',
+            }}>
+              {unreadCount > 9 ? '9+' : unreadCount}
+            </span>
+          )}
+        </button>
+
+        {notifOpen && (
+          <>
+            <div
+              onClick={() => setNotifOpen(false)}
+              style={{ position: 'fixed', inset: 0, zIndex: -1 }}
+            />
+            <div
+              ref={notifPanelRef}
+              style={{
+                position: 'absolute', top: 46, right: 0, width: 380,
+                maxHeight: '78vh', display: 'flex', flexDirection: 'column',
+                background: '#ffffff', borderRadius: 16, border: '1px solid #e5e7eb',
+                boxShadow: '0 20px 48px rgba(15,23,42,0.16), 0 2px 8px rgba(15,23,42,0.06)',
+                overflow: 'hidden', animation: 'pjaNotifIn 0.16s ease-out',
+              }}
+            >
+              <div style={{ padding: '16px 18px 12px', borderBottom: '1px solid #f1f5f9' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                  <div>
+                    <p style={{ margin: 0, fontWeight: 700, fontSize: '0.95rem', color: '#0f172a' }}>
+                      Notifikasi
+                    </p>
+                    <p style={{ margin: '2px 0 0', fontSize: '0.72rem', color: '#94a3b8' }}>
+                      {unreadCount > 0 ? `${unreadCount} belum dibaca` : 'Semua sudah dibaca'}
+                    </p>
+                  </div>
+                  {unreadCount > 0 && (
+                    <button
+                      onClick={() => markAllNotificationsRead(notifications.map((n) => n.id))}
+                      style={{
+                        background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8,
+                        cursor: 'pointer', color: '#334155', fontSize: '0.68rem', fontWeight: 600,
+                        padding: '6px 10px', whiteSpace: 'nowrap',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = '#f8fafc'; }}
+                    >
+                      Tandai semua dibaca
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: 4, marginTop: 12, background: '#f1f5f9', padding: 3, borderRadius: 9 }}>
+                  {[
+                    { key: 'semua' as const, label: 'Semua', count: notifications.length },
+                    { key: 'unread' as const, label: 'Belum dibaca', count: unreadCount },
+                  ].map((t) => (
+                    <button
+                      key={t.key}
+                      onClick={() => setNotifTab(t.key)}
+                      style={{
+                        flex: 1, padding: '6px 8px', borderRadius: 7, border: 'none',
+                        cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                        background: notifTab === t.key ? '#ffffff' : 'transparent',
+                        color: notifTab === t.key ? '#0f172a' : '#64748b',
+                        boxShadow: notifTab === t.key ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                        transition: 'background 0.15s, color 0.15s',
+                      }}
+                    >
+                      {t.label}
+                      <span style={{
+                        fontSize: '0.62rem', fontWeight: 700,
+                        color: notifTab === t.key ? '#2563EB' : '#94a3b8',
+                        background: notifTab === t.key ? '#eff6ff' : '#e2e8f0',
+                        borderRadius: 6, padding: '0 5px', minWidth: 16, textAlign: 'center',
+                      }}>
+                        {t.count}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pja-notif-scroll" style={{ overflowY: 'auto', flex: 1 }}>
+                {groupedNotifications.length === 0 ? (
+                  <div style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center',
+                    justifyContent: 'center', padding: '48px 20px', gap: 10,
+                  }}>
+                    <span style={{
+                      width: 44, height: 44, borderRadius: 12, background: '#f1f5f9',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8',
+                    }}>
+                      <Inbox size={20} />
+                    </span>
+                    <p style={{ margin: 0, fontSize: '0.78rem', fontWeight: 600, color: '#475569' }}>
+                      {notifTab === 'unread' ? 'Tidak ada notifikasi belum dibaca' : 'Belum ada notifikasi'}
+                    </p>
+                    <p style={{ margin: 0, fontSize: '0.7rem', color: '#94a3b8', textAlign: 'center', maxWidth: 220 }}>
+                      Pengajuan yang sudah disetujui Pemberi Kerja dan perlu verifikasi PJA akan muncul di sini.
+                    </p>
+                  </div>
+                ) : (
+                  groupedNotifications.map((group) => (
+                    <div key={group.label}>
+                      <p style={{
+                        margin: 0, padding: '10px 18px 6px',
+                        fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8',
+                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: '#fafbfc',
+                      }}>
+                        {group.label}
+                      </p>
+                      {group.items.map((n) => {
+                        const isRead = readNotificationIds.includes(n.id);
+                        const { color, bg, icon: Icon } = SEVERITY_STYLE[n.severity];
+                        return (
+                          <button
+                            key={n.id}
+                            onClick={() => handleOpenNotification(n)}
+                            title={formatFullDate(n.timestamp)}
+                            style={{
+                              width: '100%', display: 'flex', gap: 11, textAlign: 'left',
+                              padding: '11px 18px', border: 'none', borderBottom: '1px solid #f8fafc',
+                              background: isRead ? '#ffffff' : '#f8fbff', cursor: 'pointer',
+                              transition: 'background 0.12s',
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = isRead ? '#ffffff' : '#f8fbff'; }}
+                          >
+                            <span style={{
+                              width: 30, height: 30, borderRadius: 9, flexShrink: 0, marginTop: 1,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              background: bg, color,
+                            }}>
+                              <Icon size={15} />
+                            </span>
+                            <span style={{ flex: 1, minWidth: 0 }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{
+                                  fontSize: '0.79rem', fontWeight: isRead ? 500 : 700, color: '#0f172a',
+                                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                }}>
+                                  {n.title}
+                                </span>
+                                {!isRead && (
+                                  <span style={{
+                                    width: 6, height: 6, borderRadius: '50%',
+                                    background: '#2563EB', flexShrink: 0,
+                                  }} />
+                                )}
+                              </span>
+                              <span style={{
+                                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden', fontSize: '0.72rem', color: '#64748b',
+                                marginTop: 2, lineHeight: 1.45,
+                              }}>
+                                {n.message}
+                              </span>
+                              <span style={{ display: 'block', fontSize: '0.63rem', color: '#94a3b8', marginTop: 4, fontWeight: 500 }}>
+                                {formatClock(n.timestamp)}
+                              </span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div style={{
+                padding: '10px 18px', borderTop: '1px solid #f1f5f9',
+                background: '#fafbfc',
+              }}>
+                <button
+                  onClick={handleGoToApprovalManagement}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                    color: '#2563EB', fontSize: '0.74rem', fontWeight: 600, padding: '4px 0',
+                  }}
+                >
+                  Lihat semua di Approval Management
+                  <ArrowRight size={13} />
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
       {children}
     </div>
   );

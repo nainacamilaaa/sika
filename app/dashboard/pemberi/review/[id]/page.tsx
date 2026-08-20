@@ -4,7 +4,7 @@ import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { CheckCircle, XCircle, Clock, FileText, History, Check } from 'lucide-react';
 import { useProgramStore, getNomorSika } from '@/store/programStore';
-import type { ApprovalStatus, ApprovalLogEntry, PerubahanStatus } from '@/store/programStore';
+import type { ApprovalStatus, ApprovalLogEntry, PerubahanStatus, SertifikatData, SikaData } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
 
 /* =========================================================================
@@ -186,6 +186,490 @@ const getRiskBadgeStyle = (value: string) => {
 };
 
 /* =========================================================================
+ * Detail Sertifikat Kerja — sama persis dengan yang dipakai di halaman
+ * Detail Program milik Pemohon (sika/detail/page.tsx), supaya Pemberi
+ * Kerja bisa melihat isi sertifikat kerja (SKP, SKD, dst) yang sudah
+ * diisi pemohon sebelum menyetujui SIKA. SENGAJA generik terhadap `nama`
+ * sertifikat: selama halaman pengisiannya menyimpan data dengan pola yang
+ * sama (checklist + verifikasi, opsional gas monitoring), komponen ini
+ * otomatis merender sertifikat apa pun yang dicentang di sika.sertifikat.
+ * ======================================================================= */
+
+function YesNoCell({ active, type }: { active: boolean; type: 'yes' | 'no' }) {
+  if (!active) return <span className="w-6 h-6 rounded-full border-2 border-gray-200 mx-auto block" />;
+  return (
+    <span className={`w-6 h-6 rounded-full flex items-center justify-center mx-auto ${type === 'yes' ? 'bg-green-500' : 'bg-red-500'}`}>
+      {type === 'yes' ? (
+        <Check size={13} className="text-white" strokeWidth={3} />
+      ) : (
+        <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      )}
+    </span>
+  );
+}
+
+function ChecklistResultTable({
+  checklist,
+  checklistDocs,
+}: {
+  checklist?: { label: string; value: string | null }[];
+  checklistDocs?: Record<string, { name: string; size: number; type: string } | null>;
+}) {
+  if (!checklist?.length) return <span className="text-gray-400 text-xs italic">Belum diisi</span>;
+  return (
+    <div className="rounded overflow-hidden border border-blue-200">
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr className="bg-blue-50 border-b border-blue-200">
+            <th className="text-left text-blue-700 font-semibold px-4 py-2.5 w-8 text-xs">No</th>
+            <th className="text-left text-blue-700 font-semibold px-4 py-2.5 text-xs">Item Pemeriksaan</th>
+            <th className="text-center text-green-600 font-bold px-4 py-2.5 w-16 text-xs">YES</th>
+            <th className="text-center text-red-500 font-bold px-4 py-2.5 w-16 text-xs">NO</th>
+            <th className="text-center text-blue-600 font-bold px-4 py-2.5 w-40 text-xs">Dokumen</th>
+          </tr>
+        </thead>
+        <tbody>
+          {checklist.map((item, index) => {
+            const val = item.value;
+            const doc = checklistDocs?.[String(index)];
+            return (
+              <tr
+                key={index}
+                className={`border-b border-gray-100 ${
+                  val === 'yes' ? 'bg-green-50' : val === 'no' ? 'bg-red-50' : index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+                }`}
+              >
+                <td className="px-4 py-2 text-gray-900 text-xs font-mono">{String(index + 1).padStart(2, '0')}</td>
+                <td className="px-4 py-2 text-gray-900 text-xs leading-relaxed">{item.label}</td>
+                <td className="px-4 py-2 text-center"><YesNoCell active={val === 'yes'} type="yes" /></td>
+                <td className="px-4 py-2 text-center"><YesNoCell active={val === 'no'} type="no" /></td>
+                <td className="px-4 py-2 text-center">
+                  {doc ? (
+                    <span
+                      className="inline-flex items-center gap-1 bg-blue-50 border border-blue-200 rounded px-2 py-1 text-[11px] text-gray-700 max-w-[150px] truncate"
+                      title={doc.name}
+                    >
+                      <FileText size={11} className="text-blue-500 shrink-0" />
+                      <span className="truncate">{doc.name}</span>
+                    </span>
+                  ) : (
+                    <span className="text-gray-300 text-xs">—</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function VerifikasiResultPanel({
+  title, sub, nama, tanggal,
+}: { title: string; sub: string; nama?: string; tanggal?: string }) {
+  return (
+    <div className="rounded border-2 border-gray-200 overflow-hidden">
+      <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
+        <p className="text-xs font-bold text-gray-700">{title}</p>
+        <p className="text-[11px] text-gray-400">{sub}</p>
+      </div>
+      <div className="px-4 py-3 space-y-2 text-xs">
+        <div className="flex gap-2">
+          <span className="w-16 text-gray-500 shrink-0">Nama</span>
+          <span className="font-medium text-gray-900">{nama || '-'}</span>
+        </div>
+        <div className="flex gap-2">
+          <span className="w-16 text-gray-500 shrink-0">Tanggal</span>
+          <span className="font-medium text-gray-900">{tanggal || '-'}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GasMonitoringResultTable({ rows, diukurOleh }: { rows?: any[]; diukurOleh?: string }) {
+  const filled = rows?.filter((r) => r.time || r.lel || r.o2 || r.h2s || r.co2 || r.co || r.temp || r.sign || r.remark);
+  if (!filled?.length) return null;
+  return (
+    <div className="rounded border border-blue-200 overflow-hidden">
+      <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center justify-between flex-wrap gap-1">
+        <span className="text-xs font-bold text-blue-700 uppercase">Pemeriksaan Kondisi Gas</span>
+        <span className="text-xs text-gray-600">Diukur oleh: <span className="font-medium">{diukurOleh || '-'}</span></span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11px] border-collapse min-w-[700px]">
+          <thead>
+            <tr className="bg-blue-100">
+              <th className="border border-blue-200 px-2 py-1.5">No</th>
+              <th className="border border-blue-200 px-2 py-1.5">Time</th>
+              <th className="border border-blue-200 px-2 py-1.5">LEL %</th>
+              <th className="border border-blue-200 px-2 py-1.5">O2 %</th>
+              <th className="border border-blue-200 px-2 py-1.5">H2S ppm</th>
+              <th className="border border-blue-200 px-2 py-1.5">CO2 ppm</th>
+              <th className="border border-blue-200 px-2 py-1.5">CO ppm</th>
+              <th className="border border-blue-200 px-2 py-1.5">Temp °C</th>
+              <th className="border border-blue-200 px-2 py-1.5">Sign</th>
+              <th className="border border-blue-200 px-2 py-1.5">Remark</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filled.map((row, i) => (
+              <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                <td className="border border-gray-100 px-2 py-1 text-center font-mono">{String(i + 1).padStart(2, '0')}</td>
+                <td className="border border-gray-100 px-2 py-1 text-center">{row.time || '-'}</td>
+                <td className="border border-gray-100 px-2 py-1 text-center">{row.lel || '-'}</td>
+                <td className="border border-gray-100 px-2 py-1 text-center">{row.o2 || '-'}</td>
+                <td className="border border-gray-100 px-2 py-1 text-center">{row.h2s || '-'}</td>
+                <td className="border border-gray-100 px-2 py-1 text-center">{row.co2 || '-'}</td>
+                <td className="border border-gray-100 px-2 py-1 text-center">{row.co || '-'}</td>
+                <td className="border border-gray-100 px-2 py-1 text-center">{row.temp || '-'}</td>
+                <td className="border border-gray-100 px-2 py-1 text-center">{row.sign || '-'}</td>
+                <td className="border border-gray-100 px-2 py-1">{row.remark || '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function CertSectionHeader({
+  title, bg, color, right,
+}: { title: string; bg: string; color: string; right?: ReactNode }) {
+  return (
+    <div className="px-4 py-2 flex items-center justify-between flex-wrap gap-2" style={{ backgroundColor: bg }}>
+      <span className="font-bold text-[11px] tracking-wide uppercase" style={{ color }}>{title}</span>
+      {right}
+    </div>
+  );
+}
+
+// Safety notes — setiap sertifikat kerja punya daftar catatan keselamatan
+// sendiri, persis seperti di masing-masing halaman pengisian sertifikat.
+const CERT_SAFETY_NOTES: Record<string, string[]> = {
+  'Sertifikat Kerja Panas (SKP)': [
+    'Bahaya dalam melaksanakan pekerjaan sekaligus sebagai penyebab dasar kecelakaan adalah karena 3 faktor utama yaitu TIDAK TAHU, TIDAK MAMPU dan/atau TIDAK MAU.',
+    'Pastikan setiap pekerja telah melakukan PERSONAL ASSESSMENT - PASAL 5 dan sebelum memulai kerja group kerja melakukan Tool Box Meeting dipimpin oleh group leader /pengawas pekerjaan.',
+    'PASAL-5: P= Patuhi Procedure kerja, pastikan Action/tindakan kerja selalu aman, memiliki Skill/keahlian/pengalaman yang cukup, berperilaku/Attitude aman dalam bekerja dan usahakan bahaya pekerjaan pada tingkat yang rendah LOW risk /bisa diterima - lakukan 5 menit sebelum berangkat ke lokasi kerja oleh masing-masing pekerja.',
+    'Bahaya utama dari pekerjaan PANAS adalah kebakaran/Peledakan, pastikan jangan sampai terjadi perteuan  ketiga unsur pembentuk API dalam kegiatan tersebut.',
+    'Setiap akan memulai pekerjaan, lakukan koordinasi dan komunikasi dengan para pihak terkait dan  pastikan lokasi kerja bebas dari material yang bisa menimbulkan kebakaran/peledakan.',
+    'Pastikan kondisi Operasi APAR dan tempatkan di lokasi yang sesuai, dan mudah dijangkau.',
+    'Bila pekerjaan panas dilakukan pada ketinggian, pastikan fasilitas yang berpotensi terkena percikan di tutup dengan cover terutma untuk fasilitas yang dimungkinkan terjadi bocoran.',
+    'Pastikan semua anggota memahami tindakan dalam keadaan darurat, termasuk No. telepon dan/atau petugas yang bisa dihubungi.',
+  ],
+  'Sertifikat Kerja Dingin (SKD)': [
+    'Bahaya dalam melaksanakan pekerjaan sekaligus sebagai penyebab dasar kecelakaan adalah karena 3 faktor utama yaitu TIDAK TAHU, TIDAK MAMPU dan/atau TIDAK MAU',
+    'Pastikan setiap pekerja telah melakukan PERSONAL ASSESSMENT - PASAL 5 dan sebelum memulai kerja group kerja melakukan Tool Box Meeting dipimpin oleh group leader /pengawas pekerjaan.',
+    'PASAL-5: P= Patuhi Procedure kerja, pastikan Action/tindakan kerja selalu aman, memiliki Skill/keahlian/pengalaman yang cukup, berperilaku/Attitude aman dalam bekerja dan usahakan bahaya pekerjaan pada tingkat yang rendah LOW risk /bisa diterima - lakukan 5 menit sebelum berangkat ke lokasi kerja oleh masing-masing pekerja.',
+    'Setiap akan memulai pekerjaan, melakukan koordinasi dan komunikasi dengan para pihak terkait dan pastikan fasilitas yang akan dikerjakan benar-benar aman',
+    'Pastikan semua anggota memahami tindakan dalam keadaan darurat, termasuk No. telepon dan/atau petugas yang bisa dihubungi.',
+  ],
+  'Sertifikat Kerja Ruang Terbatas (SKRT)': [
+    'Pastikan setiap pekerja telah melakukan PERSONAL ASSESSMENT - PASAL 5 dan sebelum memulai kerja group melakukan Tool Box Meeting dipimpin oleh group leader/pengawas pekerjaan.',
+    'PASAL-5: P=Patuhi Procedure kerja, pastikan Action/tindakan kerja selalu aman, memiliki Skill/keahlian/pengalaman yang cukup, berperilaku/Attitude aman dalam bekerja dan usahakan bahaya pekerjaan pada tingkat LOW risk / bisa diterima — lakukan 5 menit sebelum berangkat ke lokasi kerja oleh masing-masing pekerja.',
+    'Pekerja yang kompeten dan berpengalaman serta paham mengikuti atau mendapatkan penjelasan tentang bahaya-bahaya bekerja di dalam ruang tertutup.',
+    'Bila ruangan memungkinkan lakukan pekerjaan ini dari luar dan pastikan ada satu orang pengawas berjaga diluar yang memonitor kegiatan dengan peralatan yang cukup, yang sewaktu-waktu siap melakukan pertolongan jika dibutuhkan.',
+    'Gunakan lifeline/tali penyelamatan/rescure untuk dipergunakan apabila diperlukan untuk penyelamatan dalam kondisi darurat.',
+    'Apabila dipandang perlu (tergantung dari kompleksitas dan besarnya risiko) dapat ditambahkan tim rescue dengan perlengkapannya di lokasi kerja, untuk keperluan emergency rescue.',
+    'Selama melakukan pekerjaan di dalam ruangan tertutup maka harus dilakukan monitoring kondisi udara di dalamnya untuk memastikan kecukupannya untuk bernafas (min 20% O2).',
+    'Lakukan pemeriksaan kondungan udara setiap akan memasuki ruangan tertutup dan setelah istirahat siang.',
+    'Buat/catat nama orang-orang yang masuk kedalam ruang tertutup/bejana dan tuliskan pada papan kontrol, pastikan catatan tersebut selalu terbaharui.',
+    'Amankan lokasi/tempat masuk/keluar ruang tertutup apabila akan istirahat atau ditunda untuk pekerjaan kesokan harinya. Pasang tanda peringatan "DILARANG MASUK BERBAHAYA".',
+    'Pasang barricade/diskelling lokasi kerja untuk memastikan hanya pekerja yang berkepentingan yang diijinkan berada di lokasi kerja.',
+  ],
+  'Sertifikat Kerja Radiografi (SKR)': [
+    'Pastikan setiap pekerja telah melakukan PERSONAL ASSESSMENT - PASAL 5 dan sebelum memulai kerja group melakukan Tool Box Meeting dipimpin oleh group leader/pengawas pekerjaan.',
+    'PASAL-5: P=Patuhi Procedure kerja, pastikan Action/tindakan kerja selalu aman, memiliki Skill/keahlian/pengalaman yang cukup, berperilaku/Attitude aman dalam bekerja dan usahakan bahaya pekerjaan pada tingkat LOW risk/bisa diterima — lakukan 5 menit sebelum berangkat ke lokasi kerja oleh masing-masing pekerja.',
+    'Pelaksana kerja melapor sebelum dan sesudah melaksanakan kegiatan, disarankan pelaksanaan dilakukan pada saat jam istirahat/tidak banyak orang kerja.',
+    'Ketahui 3 prinsip keselamatan pelaksanaan pekerjaan radiography; yaitu WAKTU-sesingkat mungkin, Jaga JARAK AMAN saat shooting dan gunakan SHIELDING/Pelindung.',
+    'Gunakan radiasi secukupnya sehingga dapat memperkecil jarak tambah.',
+    'Pastikan Containment/wadah sumber radiasi dalam kondisi yang baik, menghindari dari kebocoran.',
+    'Gunakan/pakailah Dosimeter, seperti Film atau TLD badges.',
+    'Hindari kontak dengan kontaminasi.',
+    'Bawa dan pastikan, transportasi sumber radiasi dengan cara yang aman.',
+    'Pasang barricade dan tanda peringatan selama pelaksanaan kegiatan radiography.',
+  ],
+  'Sertifikat Kerja Isolasi Listrik (SKL)': [
+    'Pastikan setiap pekerja telah melakukan PERSONAL ASSESSMENT - PASAL 5 dan sebelum memulai kerja group melakukan Tool Box Meeting dipimpin oleh group leader/pengawas pekerjaan.',
+    'PASAL-5: P=Patuhi Procedure kerja, pastikan Action/tindakan kerja selalu aman, memiliki Skill/keahlian/pengalaman yang cukup, berperilaku/Attitude aman dalam bekerja dan usahakan bahaya pekerjaan pada tingkat LOW risk/bisa diterima — lakukan 5 menit sebelum berangkat ke lokasi kerja oleh masing-masing pekerja.',
+    'PENGISOLASIAN: Saya menyatakan bahwa saya menerima tanggung jawab atas pekerjaan yang disebutkan dalam izin ini dan tidak akan ada pekerjaan yang akan dilakukan pada bagian lain dari sistem oleh saya ataupun bawahan saya.',
+    'PELEPASAN ISOLASI: Saya dengan ini menyatakan bahwa peralatan dapat dioperasikan kembali.',
+    'Untuk tegangan 4,16 KV keatas dilaksanakan oleh fungsi listrik/perawatan yang kompeten.',
+  ],
+  'Sertifikat Kerja Penggalian (SKG)': [
+    'Pastikan setiap pekerja telah melakukan PERSONAL ASSESSMENT - PASAL 5 dan sebelum memulai kerja group kerja group leader/pengawas pekerjaan.',
+    'PASAL-5: P= Patuhi Procedure kerja, pastikan Action/tindakan kerja selalu aman, memiliki Skill/keahlian/pengalaman yang cukup, berperilaku/Attitude aman dalam bekerja dan usahakan bahaya pekerjaan pada tingkat LOW risk /bisa diterima - lakukan 5 menit sebelum berangkat ke lokasi kerja oleh masing-masing.',
+    'Ingat bahaya-bahaya penggalian adalah dinding tanah galian runtuh, biss tertimbun galian, atau kejatuhan tumpukan tanah galian.',
+    'Bahaya kekurangan oksigen untuk bernafas, atau gas beracun lainnya, sir ganguan atau karena sir banjir atau hujan deras.',
+    'Bahaya dari rusaknya utilitas lain seperti kabel listrik, telekomunikasi atau pipa gas eksisting dan pipa air serta bahaya pekerjaan saat LOWERING PIPA.',
+    'Untuk semua galian harus disediakan fasilitas akses, untuk keluar masuk ke lokasi galian dalam kondisi normal dan utamanya dalam keadaan darurat.',
+    'Lokasi kerja/galian diberi barricade untuk menghindari orang terperosok.',
+    'Pada saat ada kecelakaan / orang bekerja di dalam lokasi galian harus ada orang lain yang mengawasi dari luar.',
+    'Letakkan material kerja pada posisi yang aman jauh dari tepi galian agar tidak jatuh kedalaman galian.',
+    'Rencana penyelematan RESCUE harus dibuat untuk penggalian yang dalam.',
+    'Pasang rambu-rambu peringatan disekitar lokasi kegiatan/penggalian.',
+    'Lakukan koordinasi dan komunikasi yang efektif saat akan melakukan lowering pipa dan atau saat ada kegiatan yang dekat dengan fasilitas/utilitas eksisting yang terkena dampak.',
+    'Beri tanda pembatas/safety line/barricade pada jarak yang aman agar kendaraan berat tidak melewati dekat lokasi galian.',
+  ],
+  'Sertifikat Kerja Pengangkatan (SKA)': [
+    'Bahaya dalam melaksanakan pekerjaan sekaligus sebagai penyebab dasar kecelakaan adalah karena 3 faktor utama yaitu TIDAK TAHU, TIDAK MAMPU dan/atau TIDAK MAU.',
+    'Pastikan setiap pekerja telah melakukan PERSONAL ASSESSMENT - PASAL 5 dan sebelum memulai kerja group kerja melakukan Tool Box Meeting dipimpin oleh group leader /pengawas pekerjaan.',
+    'Selama melakukan kegiatan pengangkatan pengaturan cara regular.',
+    'HINDARI mengangkat beban melebihi fasilitas yang hidup, properti pipa air bertekanan, kabel listrik, apabila hal tersebut HARUS dilakukan maka pengerjaan keselamatan yang cukup untuk melindungi bahaya harus dikerjakan.',
+    'Rigger/Signalman diperlukan untuk pengangkatan beban yang kompleks dan sangat berat.',
+    'Komunikasi dan koordinasi dengan operator/forklift terlibat diperlukan dan status diperlukan bila anda ragu.',
+  ],
+  'Sertifikat Kerja Di Ketinggian (SKK)': [
+    'Pastikan setiap pekerja telah melakukan PERSONAL ASSESSMENT - PASAL 5 dan sebelum memulai kerja group kerja melakukan Tool Box Meeting dipimpin oleh group leader/pengawas pekerjaan.',
+    'PASAL-5: PT Pertamina (Persero). Pastikan action/tindakan kerja selalu aman, berperilaku/Attitude aman dalam bekerja dan usahakan bahaya pekerjaan pada tingkat yang rendah LOW risk/bisa diterima - lakukan 5 menit sebelum berangkat ke lokasi kerja oleh masing-masing.',
+    'Pelaksana kerja melaporkan ke Field Operator/Pengawas (Proses) sebelum dan sesudah melaksanakan kegiatan, disarankan pelaksanaan dilakukan pada saat tidak banyak orang kerja atau aktivitas mandi berhenti untuk menghindari potensi bahaya dari tindakan LOW risk bahaya dengan kegiatan kerja.',
+    'Perancah yang belum di inspeksi/belum dipasang label, DILARANG untuk digunakan.',
+    'Perancah dan perlengkapannya yang sudah rusak DILARANG dipergunakan, perikendap bagian atas harus dipasang apabila terdapat potensi bahaya dari atas.',
+    'Pijakan perancah harus kuat, keras dan mampu menahan beban maksimum, naikkan dan menurunkan material harus menggunakan tali.',
+    'Semua material diatas perancah harus disimpan dengan aman dari kemungkinan jatuh.',
+  ],
+  'Sertifikat Kerja Pengambilan Fotografi (SKPF)': [
+    'Peralatan foto harus dibawa pada saat mengajukan ijin untuk diperiksa kondisinya.',
+    'Bila menggunakan lampu blitz, pengetesan gas yang mudah terbakar harus dilakukan sebelum pengambilan foto.',
+    'Untuk external (Kontraktor dan Tamu) harus didampingi oleh Sponsor/fungsi ybs.',
+    'Surat izin ini harus diperlihatkan ke Petugas Security di Pos pemeriksaan sebelum masuk area terbatas.',
+  ],
+};
+
+// Hero header sertifikat — meniru persis header halaman pengisian
+// masing-masing sertifikat (Rujukan SIKA No. | banner judul warna | logo
+// | status bar checklist). Warna & kode form mengikuti warna hero di
+// halaman pengisian; fallback ke biru tua kalau belum terdaftar.
+const CERT_HERO_STYLE: Record<string, { color: string; formCode?: string }> = {
+  'Sertifikat Kerja Panas (SKP)': { color: '#ff0000', formCode: 'F-011/B-003/PG0300/2026-S9' },
+  'Sertifikat Kerja Dingin (SKD)': { color: '#0070c0', formCode: 'F-012/B-003/PG0300/2026-S9' },
+  'Sertifikat Kerja Ruang Terbatas (SKRT)': { color: '#6b7280', formCode: 'F-013/B-003/PG0300/2026-S9' },
+  'Sertifikat Kerja Radiografi (SKR)': { color: '#7030a0', formCode: 'F-014/B-003/PG0300/2026-S9' },
+  'Sertifikat Kerja Isolasi Listrik (SKL)': { color: '#ff6600', formCode: 'F-015/B-003/PG0300/2026-S9' },
+  'Sertifikat Kerja Penggalian (SKG)': { color: '#7B3F00', formCode: 'F-012/B-003/PG0300/2026-S9' },
+  'Sertifikat Kerja Pengangkatan (SKA)': { color: '#00b050', formCode: 'F-017/B-003/PG0300/2026-S9' },
+  'Sertifikat Kerja Di Ketinggian (SKK)': { color: '#0070c0', formCode: 'F-01W/B-003/PG0300/2026-S9' },
+  'Sertifikat Kerja Pengambilan Fotografi (SKPF)': { color: '#7030a0', formCode: 'F-019/E-003/PG0300/2026-S9' },
+};
+
+function SertifikatHero({
+  nama, data, diisiOleh, diisiPada, totalChecklist, totalFilled,
+}: {
+  nama: string;
+  data: any;
+  diisiOleh?: string;
+  diisiPada?: string;
+  totalChecklist: number;
+  totalFilled: number;
+}) {
+  const style = CERT_HERO_STYLE[nama] || { color: '#1d4ed8' };
+
+  return (
+    <>
+      <div className="flex items-center justify-between px-4 pt-2 bg-white">
+        {diisiOleh && diisiPada ? (
+          <span className="text-[10px] text-green-600 font-semibold">
+            Diisi oleh {diisiOleh} · {new Date(diisiPada).toLocaleDateString('id-ID')}
+          </span>
+        ) : <span />}
+        {style.formCode && <span className="text-[10px] text-gray-400 font-mono">{style.formCode}</span>}
+      </div>
+      <div className="flex border-t border-gray-200">
+        <div className="flex items-center gap-3 px-5 py-3 border-r border-gray-200 shrink-0 bg-white">
+          <span className="text-xs font-semibold text-gray-700 whitespace-nowrap">Rujukan SIKA No.</span>
+          <span className="border border-gray-300 rounded px-3 py-1.5 text-xs text-gray-700 bg-gray-50 min-w-[120px] text-center truncate">
+            {data?.rujukanSikaNo || '-'}
+          </span>
+        </div>
+        <div style={{ flex: 3, backgroundColor: style.color, minHeight: '64px' }} className="flex items-center justify-center px-6 py-3">
+          <h2 style={{ color: '#ffffff', fontWeight: 900, fontSize: '16px', letterSpacing: '0.10em', textTransform: 'uppercase', margin: 0, textAlign: 'center' }}>
+            {nama}
+          </h2>
+        </div>
+        <div
+          className="border-l border-gray-200 bg-white"
+          style={{
+            flex: 1,
+            minHeight: '64px',
+            backgroundImage: 'url(/logopertaminagaswhite.svg)',
+            backgroundSize: '90%',
+            backgroundRepeat: 'no-repeat',
+            backgroundPosition: 'left center',
+          }}
+        />
+      </div>
+      <div className="px-5 py-2 bg-blue-50 border-t border-b border-blue-200 flex items-center justify-end gap-2">
+        <div className={`w-2 h-2 rounded-full ${totalChecklist > 0 && totalFilled === totalChecklist ? 'bg-green-500' : 'bg-amber-400'}`} />
+        <span className="text-[10px] text-gray-500">{totalFilled}/{totalChecklist} item checklist terisi</span>
+      </div>
+    </>
+  );
+}
+
+function SertifikatDetailCard({
+  nama, record, sika,
+}: { nama: string; record?: SertifikatData; sika: SikaData | null | undefined }) {
+  const data = record?.data as any;
+  const yesCount = data?.checklist?.filter((c: any) => c.value === 'yes').length ?? 0;
+  const noCount = data?.checklist?.filter((c: any) => c.value === 'no').length ?? 0;
+  const totalChecklist = data?.checklist?.length ?? 0;
+  const totalFilled = yesCount + noCount;
+  const totalDocs = data?.checklistDocs ? Object.values(data.checklistDocs).filter(Boolean).length : 0;
+  const safetyNotesForCert = CERT_SAFETY_NOTES[nama];
+
+  return (
+    <div className="border-t-2 border-gray-900">
+      {!record ? (
+        <div className="flex items-center justify-between bg-gray-800 px-4 py-2.5">
+          <span className="text-white text-[12px] font-bold tracking-wide uppercase">{nama}</span>
+          <span className="text-[10px] text-gray-300 italic">Belum diisi</span>
+        </div>
+      ) : (
+        <SertifikatHero
+          nama={nama}
+          data={data}
+          diisiOleh={record.diisiOleh}
+          diisiPada={record.diisiPada}
+          totalChecklist={totalChecklist}
+          totalFilled={totalFilled}
+        />
+      )}
+
+      {!data ? (
+        <div className="px-4 py-6 text-center text-gray-400 text-xs italic">
+          Sertifikat ini dipilih tetapi datanya belum diisi.
+        </div>
+      ) : (
+        <div className="bg-white">
+          <CertSectionHeader title="Bagian 1 — Tanggal Terbit" bg="#dbeafe" color="#1d4ed8" />
+          <div className="grid grid-cols-3 gap-6 px-4 py-3">
+            <FormField label="Tanggal Terbit" value={data.tanggalTerbit} labelWidth="w-32" />
+            <FormField
+              label="Jam Kerja"
+              value={data.jamMulai && data.jamSelesai ? `${data.jamMulai} s/d ${data.jamSelesai}` : undefined}
+              labelWidth="w-32"
+            />
+            <FormField label="Berlaku Hingga" value={data.berlakuHingga} labelWidth="w-32" />
+          </div>
+
+          <CertSectionHeader
+            title="Bagian 2 — Jenis Pekerjaan"
+            bg="#dbeafe"
+            color="#1d4ed8"
+            right={<span className="text-[10px] italic" style={{ color: '#60a5fa' }}>Data dari Jenis Pekerjaan</span>}
+          />
+          <div className="px-4 py-3 grid grid-cols-2 gap-x-10 gap-y-1">
+            <FormField label="Fungsi / Perusahaan" value={sika?.fungsiPerusahaan} labelWidth="w-44" />
+            <FormField label="Lokasi / Instalasi" value={sika?.lokasiInstalasi} labelWidth="w-44" />
+            <FormField label="Peralatan / No. Identitas" value={sika?.peralatanNoIdentitas} labelWidth="w-44" />
+            <FormField label="Jumlah Pekerja" value={sika?.pekerjaList?.length ? `${sika.pekerjaList.length} orang` : undefined} labelWidth="w-44" />
+          </div>
+          <div className="px-4 pb-3">
+            <FormField label="Uraian Pekerjaan" value={sika?.uraianPekerjaan} labelWidth="w-44" />
+            <FormField label="Peralatan Digunakan" value={sika?.peralatanDigunakan} labelWidth="w-44" />
+          </div>
+
+          <CertSectionHeader
+            title="Bagian 3 — Pemeriksaan"
+            bg="#FFFF00"
+            color="#000000"
+            right={
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${data.lainnya?.diisiOlehIA ? 'bg-green-100 text-green-700' : 'bg-white/60 text-gray-500'}`}>
+                  {data.lainnya?.diisiOlehIA ? '✓' : '—'} Diisi oleh IA
+                </span>
+                <span className="text-[10px] text-green-700 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">Yes: {yesCount}</span>
+                <span className="text-[10px] text-red-600 bg-red-50 px-2 py-0.5 rounded-full border border-red-200">No: {noCount}</span>
+                <span className="text-[10px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">Dokumen: {totalDocs}</span>
+              </div>
+            }
+          />
+          <div className="px-4 py-3">
+            <ChecklistResultTable checklist={data.checklist} checklistDocs={data.checklistDocs} />
+          </div>
+
+          <CertSectionHeader title="Bagian 4 — Verifikasi Lapangan" bg="#00b050" color="#ffffff" />
+          <div className="px-4 py-3 grid grid-cols-2 gap-4">
+            <VerifikasiResultPanel
+              title="Pelaksana Pekerjaan (PA)"
+              sub="Performing Authority · Pemberi Kerja"
+              nama={data.verifikasi?.paNama}
+              tanggal={data.verifikasi?.paTanggal}
+            />
+            <VerifikasiResultPanel
+              title="Asset Holder / IA"
+              sub="Issuing Authority · Penanggung Jawab"
+              nama={data.verifikasi?.iaNama}
+              tanggal={data.verifikasi?.iaTanggal}
+            />
+          </div>
+
+          <CertSectionHeader
+            title="Bagian 5 — Kegiatan"
+            bg="#993366"
+            color="#ffffff"
+            right={
+              <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full text-white" style={{
+                backgroundColor: data.gasMonitoring === 'ya' ? '#2563eb' : data.gasMonitoring === 'tidak' ? '#ef4444' : 'rgba(255,255,255,0.25)',
+              }}>
+                Pengukuran &amp; monitoring gas: {data.gasMonitoring === 'ya' ? 'Ya' : data.gasMonitoring === 'tidak' ? 'Tidak' : 'Belum dipilih'}
+              </span>
+            }
+          />
+          <div className="px-4 py-4 space-y-4">
+            {data.gasMonitoring === 'ya' && (
+              <GasMonitoringResultTable rows={data.gasRows} diukurOleh={data.diukurOleh} />
+            )}
+
+            {!!safetyNotesForCert?.length && (
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-4 h-4 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                    <Check size={10} className="text-white" strokeWidth={3} />
+                  </div>
+                  <p className="text-[11px] font-bold text-gray-800 uppercase tracking-wide">
+                    Hal-hal yang harus menjadi perhatian untuk keselamatan pekerjaan
+                  </p>
+                </div>
+                <div className="rounded-lg overflow-hidden border border-green-200 divide-y divide-green-100">
+                  {safetyNotesForCert.map((text, i) => (
+                    <div key={i} className={`flex items-start gap-2.5 px-3 py-2 ${i % 2 === 0 ? 'bg-white' : 'bg-green-50'}`}>
+                      <div className="w-4 h-4 rounded-full bg-green-500 flex items-center justify-center shrink-0 mt-0.5">
+                        <Check size={10} className="text-white" strokeWidth={3} />
+                      </div>
+                      <p className="text-[11px] text-gray-900 leading-relaxed">{text}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex">
+            <div className="flex items-center px-4 py-2 shrink-0" style={{ backgroundColor: '#c8b89a', minWidth: '120px' }}>
+              <span className="text-[10px] font-bold text-black uppercase tracking-widest">Distribusi:</span>
+            </div>
+            <div className="flex-1 flex items-center justify-center px-4 py-2 border-l border-gray-300" style={{ backgroundColor: '#ffffff' }}>
+              <span className="text-[10px] font-semibold text-black">Putih — Arsip PA</span>
+            </div>
+            <div className="flex-1 flex items-center justify-center px-4 py-2 border-l border-white/40" style={{ backgroundColor: '#92d050' }}>
+              <span className="text-[10px] font-bold text-black">Hijau — Arsip HSE</span>
+            </div>
+            <div className="flex-1 flex items-center justify-center px-4 py-2 border-l border-yellow-200" style={{ backgroundColor: '#ffff00' }}>
+              <span className="text-[10px] font-bold text-black">Kuning — Arsip SIKA Controller</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================================
  * PROSES APPROVAL — gaya "dashboard" (kartu rounded-xl pastel, pill badge)
  * seperti versi lama. Perubahan Data (Revalidasi) mengikuti bahasa visual
  * yang sama supaya konsisten dengan kartu SIKA & JSA di sampingnya.
@@ -229,6 +713,7 @@ export default function PemberiReviewPage() {
     approveJsaPemberi, rejectJsaPemberi,
     approvePerubahanRevalidasi, mintaRevisiPerubahan,
     approvalHistory,
+    sertifikatData,
   } = useProgramStore();
 
   // Cari submission berdasarkan id dari URL — bukan lagi hardcoded 'store-1'.
@@ -601,6 +1086,20 @@ export default function PemberiReviewPage() {
               </div>
             </div>
           </div>
+
+          {/* ===================== DETAIL SERTIFIKAT KERJA ===================== */}
+          {!!sika?.sertifikat?.length && (
+            <div>
+              <div className="bg-gray-900 px-4 py-2.5">
+                <span className="text-white text-[12px] font-bold tracking-widest uppercase">
+                  Detail Sertifikat Kerja
+                </span>
+              </div>
+              {sika.sertifikat.map((nama) => (
+                <SertifikatDetailCard key={nama} nama={nama} record={sertifikatData?.[nama]} sika={sika} />
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

@@ -163,7 +163,7 @@ export default function EntryProgramPage() {
   );
 
   const fieldClass = (field: string) =>
-    `flex-1 border rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 bg-white ${
+    `w-full border rounded px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-1 bg-white ${
       errors[field]
         ? 'border-red-400 focus:ring-red-400'
         : 'border-gray-300 focus:ring-blue-400'

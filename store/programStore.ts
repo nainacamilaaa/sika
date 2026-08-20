@@ -166,38 +166,15 @@ type ApprovalStatus = 'draft' | 'request' | 'waiting' | 'approved' | 'rejected';
 
 interface ApprovalLogEntry {
   id: string;
-  // 'revalidasi' = log seputar pemulihan status Suspend (lihat
-  // ajukanRevalidasiSuspend/approveRevalidasiSuspend/rejectRevalidasiSuspend
-  // di bawah) — SENGAJA dipisah dari 'perubahan' (itu untuk pengajuan
-  // perubahan DATA seperti sertifikat/pekerja baru), karena keduanya
-  // adalah alur approval yang berbeda meski sama-sama muncul di kolom
-  // "Revalidasi" pada tabel Data Management.
   dokumen: 'sika' | 'jsa' | 'perubahan' | 'revalidasi';
   aksi: 'approve' | 'reject' | 'ajukan_ulang';
   oleh: string;
   peran: 'pemberi' | 'pja' | 'pemohon';
   alasan?: string;
-  // Submission mana yang terkait log ini. Opsional supaya entri lama (dari
-  // sebelum field ini ada) tidak error, tapi SEMUA log baru harus mengisi ini
-  // — tanpanya, begitu ada 2+ submission, riwayat approval antar pengajuan
-  // akan tercampur dan tidak bisa dibedakan.
   submissionId?: string;
   timestamp: string;
 }
 
-/* ============================================================
- * SubmissionRecord — satu pengajuan SIKA/JSA yang sudah di-submit
- * (Request Review) oleh pemohon.
- *
- * `program` / `sika` / `jsa` di root store (di bawah) tetap dipakai
- * sebagai "draft aktif" yang sedang diisi lewat halaman Program New →
- * SIKA New → JSA New → Detail Program — itu tidak berubah.
- *
- * Begitu pemohon menekan "Request Review", draft aktif itu di-snapshot
- * ke dalam `submissions[]` supaya riwayat pengajuan sebelumnya tidak
- * tertimpa saat pemohon membuat pengajuan baru. Field status approval
- * (Pemberi/PJA) & riwayat revalidasi disimpan per-submission di sini.
- * ============================================================ */
 interface SubmissionRecord {
   id: string;
   program: ProgramData;
@@ -214,41 +191,16 @@ interface SubmissionRecord {
   alasanTolakSikaPJA: string | null;
   alasanTolakJsaPJA: string | null;
 
-  // Tanggal-tanggal (YYYY-MM-DD) saat revalidasi harian sudah dikonfirmasi,
-  // maks. 7 hari sejak createdAt. Disimpan di sini (bukan React state lokal)
-  // supaya tidak hilang saat reload / pindah halaman.
   riwayatRevalidasi: string[];
 
-  // Pengajuan pemulihan setelah submission ini sempat berstatus "Suspend"
-  // (lihat getRevalidasiOverride di bawah — kalau tanggal KEMARIN belum
-  // tervalidasi, submission otomatis dianggap Suspend). null = tidak ada
-  // pengajuan pemulihan yang sedang berjalan. BEDA dari revalidasi harian
-  // biasa: revalidasi harian biasa cukup self-certify pemohon lewat
-  // catatRevalidasi (tanpa approval), tapi PEMULIHAN dari Suspend WAJIB
-  // lewat approval Pemberi Kerja — begitu disetujui baru tanggal yang
-  // diajukan ditambahkan ke riwayatRevalidasi.
   revalidasiSuspendRequest: {
     tanggal: string;
     status: 'menunggu' | 'ditolak';
     alasanTolak?: string | null;
   } | null;
 
-  // Perubahan data (sertifikat/pekerja baru, dll) yang diajukan pemohon
-  // SETELAH submission ini aktif/closed — lihat "Kirim Konfirmasi Revalidasi"
-  // di Detail Program. Sengaja TERPISAH dari sikaStatusPemberi/jsaStatusPemberi
-  // di atas: submission yang sedang berjalan tidak boleh kehilangan status
-  // 'aktif'/'closed'-nya hanya karena sedang menunggu Pemberi meninjau
-  // perubahan ini.
   perubahanStatus: PerubahanStatus;
-  // Catatan dari Pemberi Kerja saat meminta pemohon melengkapi/memperbaiki
-  // pengajuan perubahan (perubahanStatus === 'revisi'). BUKAN penolakan
-  // permanen — pemohon masih bisa mengajukan ulang lewat "Kirim Konfirmasi
-  // Revalidasi" di Detail Program. Ditampilkan ke pemohon sebagai
-  // "Catatan Revisi Sebelumnya".
   catatanRevisiPerubahan: string | null;
-  // Catatan bebas dari pemohon yang menyertai pengajuan perubahan ini,
-  // ditampilkan ke Pemberi Kerja saat mereka me-review (lihat halaman
-  // Data Management Pemberi).
   catatanPerubahan: string | null;
 
   createdAt: string;
@@ -295,11 +247,6 @@ const makeLogEntry = (
 const makeSubmissionId = () =>
   `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-/**
- * Gabungan "Area/Fungsi-NomorUrut" untuk Nomor SIKA, konsisten dipakai di
- * Detail Program, JSA New, dan Data Management. `sika.noSIKA` TIDAK dipakai
- * karena field itu tidak pernah diisi lewat form manapun.
- */
 export const getNomorSika = (
   sika: Pick<SikaBasicData, 'noSikaAreaFungsi' | 'noSikaNomorUrut'> | null | undefined
 ): string => {
@@ -307,26 +254,15 @@ export const getNomorSika = (
   return `${sika.noSikaAreaFungsi || '-'}-${sika.noSikaNomorUrut || '-'}`;
 };
 
-/**
- * Status gabungan Pemberi + PJA untuk satu submission. Dipakai bareng oleh
- * Data Management (badge status per baris) dan Detail Program (menentukan
- * apakah tombol yang tampil "Request Review" atau "Kirim Konfirmasi
- * Revalidasi" — lihat catatan di ProgramStore.openSubmission).
- *
- * CATATAN: 'suspend' TIDAK pernah dihasilkan oleh getOverallStatus di
- * bawah — status itu murni soal approval Pemberi/PJA. 'suspend' (dan
- * auto-'closed' karena lewat batas revalidasi) adalah lapisan TAMBAHAN
- * yang cuma berlaku ketika status dasarnya 'aktif', lihat
- * getRevalidasiOverride().
- */
 export type OverallStatus = 'aktif' | 'pending' | 'ditolak' | 'closed' | 'draft' | 'suspend';
 
-// Status pengajuan perubahan data (revalidasi dengan update) — lihat
-// SubmissionRecord.perubahanStatus di bawah. 'revisi' (bukan 'ditolak'):
-// perubahan dikembalikan ke pemohon untuk dilengkapi lagi, bukan ditutup
-// permanen — SIKA & JSA yang sudah aktif tidak terpengaruh selama proses ini.
 export type PerubahanStatus = 'none' | 'menunggu' | 'disetujui' | 'revisi';
 
+// ============================================================
+// PERBAIKAN: SIKA baru "aktif" setelah Pemberi approve DAN PJA approve
+// Sebelumnya: Pemberi approve saja langsung "aktif"
+// Sekarang: Pemberi approve + PJA approve → "aktif"
+// ============================================================
 export const getOverallStatus = (
   sikaPemberi: ApprovalStatus,
   jsaPemberi: ApprovalStatus,
@@ -334,37 +270,53 @@ export const getOverallStatus = (
   jsaPJA: ApprovalStatus
 ): OverallStatus => {
   if (sikaPemberi === 'rejected' || jsaPemberi === 'rejected' || sikaPJA === 'rejected' || jsaPJA === 'rejected') return 'ditolak';
+  
+  // SIKA baru aktif setelah Pemberi approve DAN PJA approve
+  if (sikaPemberi === 'approved' && jsaPemberi === 'approved' && sikaPJA === 'approved' && jsaPJA === 'approved') {
+    return 'aktif';
+  }
+  
   if (sikaPJA === 'approved' && jsaPJA === 'approved') return 'closed';
-  if (sikaPemberi === 'approved' && jsaPemberi === 'approved') return 'aktif';
+  if (sikaPemberi === 'approved' && jsaPemberi === 'approved') return 'pending';
   if (sikaPemberi === 'request' || jsaPemberi === 'request') return 'pending';
   return 'draft';
 };
 
-// Batas maksimal revalidasi harian sejak tanggal pengajuan (createdAt).
-// Diekspor supaya UI (Data Management, modal revalidasi, dst) pakai angka
-// yang sama persis dengan logika di getRevalidasiOverride — tidak ada lagi
-// duplikasi konstanta antara store dan halaman.
 export const MAX_HARI_REVALIDASI = 7;
 
-/**
- * Menentukan status "override" akibat (tidak)-nya revalidasi harian untuk
- * submission yang status dasarnya 'aktif'. Cuma dipanggil kalau
- * getOverallStatus(...) sudah menghasilkan 'aktif' — status 'draft' /
- * 'pending' / 'ditolak' / 'closed' tidak pernah kena override ini.
- *
- * Aturan:
- * - Hari ke-N (dihitung dari createdAt, hari pertama = hari ke-1) melewati
- *   MAX_HARI_REVALIDASI → otomatis 'closed' (wajib ajukan SIKA baru).
- * - Hari pertama (belum ada "hari sebelumnya" yang wajib divalidasi) →
- *   tidak ada override, tetap 'aktif'.
- * - Kalau tanggal KEMARIN belum ada di riwayatRevalidasi → 'suspend',
- *   sampai pemohon mengajukan pemulihan dan Pemberi Kerja menyetujuinya
- *   (lihat ajukanRevalidasiSuspend / approveRevalidasiSuspend).
- * - Selain itu → null (tidak ada override, tampil normal sebagai 'aktif').
- */
+export const toLocalDateKey = (d: Date): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const digitsToDate = (digits?: string[]): Date | null => {
+  if (!digits || digits.length !== 6 || digits.some((d) => !d)) return null;
+  const [d1, d2, m1, m2, y1, y2] = digits;
+  const iso = `20${y1}${y2}-${m1}${m2}-${d1}${d2}`;
+  const date = new Date(iso);
+  return isNaN(date.getTime()) ? null : date;
+};
+
+export const getDurasiRevalidasi = (
+  sika: Pick<SikaBasicData, 'tanggalTerbit' | 'berlakuHingga'> | null | undefined
+): number => {
+  if (!sika) return MAX_HARI_REVALIDASI;
+  const mulai = digitsToDate(sika.tanggalTerbit);
+  const selesai = digitsToDate(sika.berlakuHingga);
+  if (!mulai || !selesai) return MAX_HARI_REVALIDASI;
+
+  const msPerHari = 1000 * 60 * 60 * 24;
+  const selisih = Math.round((selesai.getTime() - mulai.getTime()) / msPerHari) + 1;
+  if (selisih < 1) return MAX_HARI_REVALIDASI;
+  return Math.min(selisih, MAX_HARI_REVALIDASI);
+};
+
 export const getRevalidasiOverride = (
   createdAt: string,
-  riwayatRevalidasi: string[]
+  riwayatRevalidasi: string[],
+  durasiRevalidasi: number = MAX_HARI_REVALIDASI
 ): 'suspend' | 'closed' | null => {
   const start = new Date(createdAt);
   if (isNaN(start.getTime())) return null;
@@ -376,14 +328,18 @@ export const getRevalidasiOverride = (
   const msPerHari = 1000 * 60 * 60 * 24;
   const hariKe = Math.round((today.getTime() - start.getTime()) / msPerHari) + 1;
 
-  if (hariKe > MAX_HARI_REVALIDASI) return 'closed';
-  if (hariKe <= 1) return null;
+  const batasHari = Math.min(Math.max(durasiRevalidasi, 1), MAX_HARI_REVALIDASI);
 
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  const yesterdayKey = yesterday.toISOString().split('T')[0];
+  if (hariKe > batasHari) return 'closed';
 
-  return riwayatRevalidasi.includes(yesterdayKey) ? null : 'suspend';
+  const hariWajibDicek = hariKe - 1;
+  if (hariWajibDicek < 1) return null;
+
+  const tanggalWajib = new Date(start);
+  tanggalWajib.setDate(start.getDate() + (hariWajibDicek - 1));
+  const key = toLocalDateKey(tanggalWajib);
+
+  return riwayatRevalidasi.includes(key) ? null : 'suspend';
 };
 
 interface ProgramStore {
@@ -402,10 +358,6 @@ interface ProgramStore {
   workPermitList: WorkPermitData[];
   filledSertifikat: string[];
 
-  // Status Pemberi/PJA untuk draft yang SEDANG AKTIF (mirror dari submission
-  // yang activeSubmissionId-nya cocok). Dipertahankan flat di sini supaya
-  // halaman Program New / SIKA New / JSA New / Detail Program tidak perlu
-  // tahu soal `submissions[]` sama sekali.
   sikaStatusPemberi: ApprovalStatus;
   jsaStatusPemberi: ApprovalStatus;
   alasanTolakSikaPemberi: string | null;
@@ -416,7 +368,6 @@ interface ProgramStore {
   alasanTolakSikaPJA: string | null;
   alasanTolakJsaPJA: string | null;
 
-  // --- Multi-pengajuan (Data Management) ---
   submissions: SubmissionRecord[];
   activeSubmissionId: string | null;
 
@@ -424,9 +375,6 @@ interface ProgramStore {
   sertifikatData: Record<string, SertifikatData>;
   gasMonitoringData: Record<string, GasMonitoringData>;
 
-  // --- Notifikasi (dibaca dari approvalHistory + submissions, lihat
-  // lib/notifications.ts). Yang disimpan di store cuma id yang SUDAH dibaca
-  // pemohon, supaya badge unread persist antar sesi tanpa perlu store baru.
   readNotificationIds: string[];
 
   setProgram: (data: ProgramData) => void;
@@ -453,13 +401,10 @@ interface ProgramStore {
   setGasMonitoringData: (key: string, data: GasMonitoringData) => void;
   removeGasMonitoringData: (key: string) => void;
 
-  // Submit draft aktif → dibuat/diupdate sebagai SubmissionRecord di `submissions[]`
   submitToPemberi: (oleh: string) => void;
   ajukanUlangSika: (oleh: string, id?: string) => void;
   ajukanUlangJsa: (oleh: string, id?: string) => void;
 
-  // `id` opsional: default ke activeSubmissionId (draft yang sedang dibuka).
-  // Data Management (yang menampilkan banyak baris) sebaiknya selalu kirim `id` eksplisit.
   approveSikaPemberi: (oleh: string, id?: string) => void;
   rejectSikaPemberi: (oleh: string, alasan: string, id?: string) => void;
   approveJsaPemberi: (oleh: string, id?: string) => void;
@@ -470,45 +415,19 @@ interface ProgramStore {
   approveJsaPJA: (oleh: string, id?: string) => void;
   rejectJsaPJA: (oleh: string, alasan: string, id?: string) => void;
 
-  // Kirim update data (sertifikat/pekerja baru, dll) untuk submission yang
-  // SUDAH aktif/closed, sebagai konfirmasi revalidasi ke Pemberi Kerja.
-  // Sengaja TIDAK memakai submitToPemberi — itu untuk pengajuan pertama kali
-  // dan akan reset status Pemberi ke 'request' sehingga submission tampak
-  // "belum berlaku" lagi. Di sini hanya `perubahanStatus` yang berubah;
-  // sikaStatusPemberi/jsaStatusPemberi tetap 'approved' sepanjang proses.
   ajukanPerubahanRevalidasi: (oleh: string, catatan?: string, id?: string) => void;
   approvePerubahanRevalidasi: (oleh: string, id?: string) => void;
-  // Pemberi Kerja meminta pemohon melengkapi/memperbaiki pengajuan
-  // perubahan (perubahanStatus → 'revisi'). BUKAN penolakan permanen —
-  // SIKA & JSA yang sudah aktif tidak ikut berubah. Dipakai di
-  // Approval Management → RevalidasiMasukModal ("Minta Revisi").
   mintaRevisiPerubahan: (oleh: string, catatan: string, id?: string) => void;
 
-  // Catat revalidasi harian untuk submission tertentu (idempotent per tanggal)
   catatRevalidasi: (id: string, tanggalKey: string) => void;
 
-  // Pemohon mengajukan pemulihan setelah SIKA berstatus Suspend (telat
-  // revalidasi kemarin). BUKAN langsung mengaktifkan kembali — status
-  // berubah jadi 'menunggu' dan baru tercatat sebagai tervalidasi
-  // (riwayatRevalidasi bertambah) setelah Pemberi Kerja approve lewat
-  // approveRevalidasiSuspend. Lihat getRevalidasiOverride() untuk logika
-  // penentuan kapan sebuah submission dianggap 'suspend'.
   ajukanRevalidasiSuspend: (oleh: string, id?: string) => void;
   approveRevalidasiSuspend: (oleh: string, id?: string) => void;
   rejectRevalidasiSuspend: (oleh: string, alasan: string, id?: string) => void;
 
-  // Kosongkan draft aktif (program/sika/jsa + status) tanpa menghapus
-  // riwayat `submissions[]` — dipanggil sebelum mulai pengajuan baru.
   startNewDraft: () => void;
-
-  // Muat snapshot sebuah submission lama ke field draft aktif (program/sika/jsa
-  // + status Pemberi/PJA), supaya halaman yang membaca state flat (Detail
-  // Program, dst) otomatis menampilkan submission itu tanpa perlu diubah.
-  // Dipanggil sebelum navigasi ke halaman Detail dari baris tabel manapun
-  // di Data Management.
   openSubmission: (id: string) => void;
 
-  // Tandai satu / semua notifikasi sudah dibaca (lihat readNotificationIds).
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: (ids: string[]) => void;
 
@@ -518,7 +437,6 @@ interface ProgramStore {
 export const useProgramStore = create<ProgramStore>()(
   persist(
     (set, get) => {
-      // ---- helper internal: patch satu SubmissionRecord di array ----
       const patchSubmission = (id: string, patch: Partial<SubmissionRecord>) => {
         set((state) => ({
           submissions: state.submissions.map((s) =>
@@ -527,7 +445,6 @@ export const useProgramStore = create<ProgramStore>()(
         }));
       };
 
-      // ---- helper internal: approve/reject dengan guard + log + mirror ----
       const applyApproval = (
         id: string | undefined,
         dokumen: 'sika' | 'jsa',
@@ -548,9 +465,6 @@ export const useProgramStore = create<ProgramStore>()(
 
         patchSubmission(targetId, patch);
         set((s) => ({
-          // Mirror ke field flat HANYA kalau yang di-approve/reject adalah
-          // draft yang sedang aktif dibuka — supaya status program lain
-          // yang kebetulan sedang tidak dibuka tidak ikut "berubah" di layar.
           ...(targetId === s.activeSubmissionId ? (patch as Partial<ProgramStore>) : {}),
           approvalHistory: [...s.approvalHistory, makeLogEntry({ dokumen, aksi, oleh, peran, alasan, submissionId: targetId })],
         }));
@@ -591,8 +505,6 @@ export const useProgramStore = create<ProgramStore>()(
 
         readNotificationIds: [],
 
-        // createdAt dipertahankan dari state sebelumnya kalau sudah ada (diisi
-        // sekali saat program pertama kali dibuat), updatedAt selalu diperbarui.
         setProgram: (data) =>
           set((state) => ({
             program: {
@@ -732,7 +644,6 @@ export const useProgramStore = create<ProgramStore>()(
           const targetId = existingId ?? makeSubmissionId();
 
           if (existingId) {
-            // Submit ulang setelah revisi: perbarui snapshot & reset status ke 'request'
             submissions = state.submissions.map((s) =>
               s.id === existingId
                 ? {
@@ -949,7 +860,7 @@ export const useProgramStore = create<ProgramStore>()(
           const record = state.submissions.find((s) => s.id === targetId);
           if (!record) return;
 
-          const todayKey = new Date().toISOString().split('T')[0];
+          const todayKey = toLocalDateKey(new Date());
           patchSubmission(targetId, {
             revalidasiSuspendRequest: { tanggal: todayKey, status: 'menunggu' },
           });

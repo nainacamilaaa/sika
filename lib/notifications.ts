@@ -43,9 +43,6 @@ function toDateKey(d: Date) {
 }
 
 const AKSI_LABEL: Record<'approve' | 'reject', string> = { approve: 'disetujui', reject: 'ditolak' };
-// 'revalidasi' = log approve/reject seputar pengajuan PEMULIHAN setelah SIKA
-// sempat Suspend (lihat ajukanRevalidasiSuspend di store) — beda dari
-// 'perubahan' yang soal pengajuan perubahan DATA (sertifikat/pekerja baru).
 const DOKUMEN_LABEL: Record<'sika' | 'jsa' | 'perubahan' | 'revalidasi', string> = {
   sika: 'SIKA',
   jsa: 'JSA',
@@ -57,17 +54,6 @@ const PERAN_LABEL: Record<'pemberi' | 'pja', string> = {
   pja: 'Asset Holder (PJA)',
 };
 
-/**
- * Menghasilkan daftar notifikasi untuk PEMOHON, dari dua sumber:
- * 1. approvalHistory — event approve/reject asli dari Pemberi/PJA (real, sudah
- *    ada id & timestamp sendiri, jadi id notifikasi dipakai ulang dari log.id).
- * 2. Status submission saat ini — revalidasi jatuh tempo, Suspend, & masa
- *    berlaku SIKA, dihitung ulang tiap kali dipanggil (bukan disimpan),
- *    supaya selalu akurat terhadap tanggal hari ini tanpa perlu job/cron
- *    terpisah. Status Suspend/auto-Closed dihitung lewat getRevalidasiOverride
- *    dari store — SATU sumber kebenaran yang sama dipakai Data Management,
- *    supaya notifikasi ini tidak pernah beda cerita dengan badge di tabel.
- */
 export function getNotifications(
   submissions: SubmissionRecord[],
   approvalHistory: ApprovalLogEntry[]
@@ -75,7 +61,6 @@ export function getNotifications(
   const notifs: AppNotification[] = [];
   const todayKey = toDateKey(new Date());
 
-  // 1) Keputusan Pemberi/PJA/perubahan/revalidasi
   for (const log of approvalHistory) {
     if (log.peran === 'pemohon' || !log.submissionId) continue;
     if (log.aksi !== 'approve' && log.aksi !== 'reject') continue;
@@ -97,14 +82,13 @@ export function getNotifications(
           : `${dokLabel} ${aksiLabel}`,
       message:
         log.aksi === 'reject' && log.alasan
-          ? `${namaProgram} — ${dokLabel} ditolak oleh ${peranLabel}: ${log.alasan}`
-          : `${namaProgram} — ${dokLabel} ${aksiLabel} oleh ${peranLabel}.`,
+          ? `${peranLabel} menolak ${dokLabel.toLowerCase()} untuk ${namaProgram}. Alasan: ${log.alasan}`
+          : `${dokLabel} untuk ${namaProgram} telah ${aksiLabel} oleh ${peranLabel}.`,
       severity: log.aksi === 'approve' ? 'success' : 'danger',
       timestamp: log.timestamp,
     });
   }
 
-  // 2) Revalidasi (termasuk Suspend) & masa berlaku SIKA
   for (const sub of submissions) {
     const overall = getOverallStatus(
       sub.sikaStatusPemberi,
@@ -124,7 +108,7 @@ export function getNotifications(
           id: `revalidasi-limit-${sub.id}`,
           submissionId: sub.id,
           title: 'Batas revalidasi terlampaui',
-          message: `${namaProgram} sudah melewati batas ${MAX_HARI_REVALIDASI} hari revalidasi — SIKA otomatis Closed, ajukan SIKA baru.`,
+          message: `${namaProgram} telah melewati batas ${MAX_HARI_REVALIDASI} hari revalidasi. SIKA berstatus Closed secara otomatis dan perlu diajukan kembali sebagai SIKA baru.`,
           severity: 'danger',
           timestamp: sub.updatedAt,
         });
@@ -135,7 +119,7 @@ export function getNotifications(
             id: `suspend-pending-${sub.id}`,
             submissionId: sub.id,
             title: 'Menunggu approval pemulihan',
-            message: `${namaProgram} sedang Suspend — pengajuan pemulihan menunggu persetujuan Pemberi Kerja.`,
+            message: `Pengajuan pemulihan untuk ${namaProgram} sedang menunggu persetujuan Pemberi Kerja.`,
             severity: 'warning',
             timestamp: sub.updatedAt,
           });
@@ -145,8 +129,8 @@ export function getNotifications(
             submissionId: sub.id,
             title: 'Pengajuan pemulihan ditolak',
             message: req.alasanTolak
-              ? `${namaProgram} masih Suspend — Pemberi Kerja menolak pemulihan: ${req.alasanTolak}`
-              : `${namaProgram} masih Suspend — Pemberi Kerja menolak pengajuan pemulihan. Ajukan ulang lewat Data Management.`,
+              ? `Pemberi Kerja menolak pengajuan pemulihan untuk ${namaProgram}. Alasan: ${req.alasanTolak}`
+              : `Pemberi Kerja menolak pengajuan pemulihan untuk ${namaProgram}. Silakan ajukan kembali melalui Data Management.`,
             severity: 'danger',
             timestamp: sub.updatedAt,
           });
@@ -155,7 +139,7 @@ export function getNotifications(
             id: `suspend-${sub.id}`,
             submissionId: sub.id,
             title: 'SIKA di-suspend',
-            message: `${namaProgram} di-suspend karena revalidasi kemarin terlewat. Ajukan pemulihan lewat Data Management.`,
+            message: `${namaProgram} berstatus Suspend karena revalidasi kemarin belum dilakukan. Silakan ajukan pemulihan melalui Data Management.`,
             severity: 'danger',
             timestamp: sub.updatedAt,
           });
@@ -180,6 +164,227 @@ export function getNotifications(
     if (sisaHari !== null && sisaHari <= 7) {
       notifs.push({
         id: `expiry-${sub.id}`,
+        submissionId: sub.id,
+        title: sisaHari < 0 ? 'SIKA sudah berakhir' : 'SIKA akan berakhir',
+        message:
+          sisaHari < 0
+            ? `${namaProgram} berakhir ${Math.abs(sisaHari)} hari lalu.`
+            : sisaHari === 0
+            ? `${namaProgram} berakhir hari ini.`
+            : `${namaProgram} berakhir dalam ${sisaHari} hari.`,
+        severity: sisaHari <= 2 ? 'danger' : 'warning',
+        timestamp: sub.updatedAt,
+      });
+    }
+  }
+
+  return notifs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+}
+
+export function getPemberiNotifications(
+  submissions: SubmissionRecord[],
+  approvalHistory: ApprovalLogEntry[]
+): AppNotification[] {
+  const notifs: AppNotification[] = [];
+
+  for (const log of approvalHistory) {
+    if (log.peran !== 'pemohon' || log.aksi !== 'ajukan_ulang' || !log.submissionId) continue;
+
+    const sub = submissions.find((s) => s.id === log.submissionId);
+    if (!sub) continue;
+    const namaProgram = sub.program.namaPaket || getNomorSika(sub.sika);
+
+    if (log.dokumen === 'sika' || log.dokumen === 'jsa') {
+      notifs.push({
+        id: log.id,
+        submissionId: sub.id,
+        title: 'Pengajuan baru masuk',
+        message: `${namaProgram} baru diajukan oleh pemohon dan perlu ditinjau.`,
+        severity: 'info',
+        timestamp: log.timestamp,
+      });
+    } else if (log.dokumen === 'perubahan') {
+      notifs.push({
+        id: log.id,
+        submissionId: sub.id,
+        title: 'Revalidasi masuk',
+        message: `Pemohon mengajukan perubahan data untuk ${namaProgram} dan perlu ditinjau.`,
+        severity: 'warning',
+        timestamp: log.timestamp,
+      });
+    } else if (log.dokumen === 'revalidasi') {
+      notifs.push({
+        id: log.id,
+        submissionId: sub.id,
+        title: 'Pengajuan pemulihan Suspend',
+        message: `${namaProgram} sempat berstatus Suspend dan pemohon telah mengajukan pemulihan.`,
+        severity: 'warning',
+        timestamp: log.timestamp,
+      });
+    }
+  }
+
+  for (const sub of submissions) {
+    const pemberiApproved = sub.sikaStatusPemberi === 'approved' && sub.jsaStatusPemberi === 'approved';
+    if (!pemberiApproved) continue;
+
+    const namaProgram = sub.program.namaPaket || getNomorSika(sub.sika);
+    const tanggalBerakhir = digitsToDateString(sub.sika.berlakuHingga);
+    const sisaHari = hitungSisaHari(tanggalBerakhir);
+    if (sisaHari !== null && sisaHari <= 7) {
+      notifs.push({
+        id: `pemberi-expiry-${sub.id}`,
+        submissionId: sub.id,
+        title: sisaHari < 0 ? 'SIKA sudah berakhir' : 'SIKA akan berakhir',
+        message:
+          sisaHari < 0
+            ? `${namaProgram} berakhir ${Math.abs(sisaHari)} hari lalu.`
+            : sisaHari === 0
+            ? `${namaProgram} berakhir hari ini.`
+            : `${namaProgram} berakhir dalam ${sisaHari} hari.`,
+        severity: sisaHari <= 2 ? 'danger' : 'warning',
+        timestamp: sub.updatedAt,
+      });
+    }
+  }
+
+  return notifs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+}
+
+// ============================================================
+// NOTIFIKASI UNTUK PJA
+// ============================================================
+
+export function getPJANotifications(
+  submissions: SubmissionRecord[],
+  approvalHistory: ApprovalLogEntry[]
+): AppNotification[] {
+  const notifs: AppNotification[] = [];
+
+  // 1) Event dari Pemberi Kerja yang perlu ditindaklanjuti PJA
+  //    - Pemberi approve SIKA → PJA harus review
+  //    - Pemberi approve JSA → PJA harus review
+  for (const log of approvalHistory) {
+    if (log.peran !== 'pemberi' || log.aksi !== 'approve' || !log.submissionId) continue;
+    if (log.dokumen !== 'sika' && log.dokumen !== 'jsa') continue;
+
+    const sub = submissions.find((s) => s.id === log.submissionId);
+    if (!sub) continue;
+
+    // Skip jika sudah di-approve oleh PJA
+    if (log.dokumen === 'sika' && sub.sikaStatusPJA === 'approved') continue;
+    if (log.dokumen === 'jsa' && sub.jsaStatusPJA === 'approved') continue;
+    // Skip jika sudah di-reject oleh PJA
+    if (log.dokumen === 'sika' && sub.sikaStatusPJA === 'rejected') continue;
+    if (log.dokumen === 'jsa' && sub.jsaStatusPJA === 'rejected') continue;
+
+    const namaProgram = sub.program.namaPaket || getNomorSika(sub.sika);
+    const dokLabel = log.dokumen === 'sika' ? 'SIKA' : 'JSA';
+
+    notifs.push({
+      id: `pja-review-${log.id}`,
+      submissionId: sub.id,
+      title: `${dokLabel} menunggu review PJA`,
+      message: `${dokLabel} untuk ${namaProgram} telah disetujui oleh Pemberi Kerja dan menunggu verifikasi dari Asset Holder (PJA).`,
+      severity: 'info',
+      timestamp: log.timestamp,
+    });
+  }
+
+  // 2) Event dari Pemohon yang perlu ditindaklanjuti PJA
+  //    - Pemohon submit ulang setelah revisi
+  for (const log of approvalHistory) {
+    if (log.peran !== 'pemohon' || log.aksi !== 'ajukan_ulang' || !log.submissionId) continue;
+    if (log.dokumen !== 'sika' && log.dokumen !== 'jsa') continue;
+
+    const sub = submissions.find((s) => s.id === log.submissionId);
+    if (!sub) continue;
+
+    // Cek apakah sudah disetujui Pemberi dan PJA belum approve
+    const pemberiApproved = log.dokumen === 'sika' 
+      ? sub.sikaStatusPemberi === 'approved' 
+      : sub.jsaStatusPemberi === 'approved';
+    if (!pemberiApproved) continue;
+
+    const pjaStatus = log.dokumen === 'sika' ? sub.sikaStatusPJA : sub.jsaStatusPJA;
+    if (pjaStatus === 'approved' || pjaStatus === 'rejected') continue;
+
+    const namaProgram = sub.program.namaPaket || getNomorSika(sub.sika);
+    const dokLabel = log.dokumen === 'sika' ? 'SIKA' : 'JSA';
+
+    notifs.push({
+      id: `pja-revisi-${log.id}`,
+      submissionId: sub.id,
+      title: `${dokLabel} diajukan ulang setelah revisi`,
+      message: `${dokLabel} untuk ${namaProgram} telah diajukan ulang oleh pemohon. Mohon lakukan verifikasi ulang.`,
+      severity: 'warning',
+      timestamp: log.timestamp,
+    });
+  }
+
+  // 3) Dokumen PJA yang perlu diupload (SIKA & JSA sudah di-approve Pemberi)
+  for (const sub of submissions) {
+    const pemberiApproved = sub.sikaStatusPemberi === 'approved' && sub.jsaStatusPemberi === 'approved';
+    if (!pemberiApproved) continue;
+
+    const pjaSikaApproved = sub.sikaStatusPJA === 'approved';
+    const pjaJsaApproved = sub.jsaStatusPJA === 'approved';
+
+    // Jika sudah di-approve PJA semua, skip
+    if (pjaSikaApproved && pjaJsaApproved) continue;
+
+    // Jika sudah di-reject PJA, skip (tidak perlu notif lagi)
+    if (sub.sikaStatusPJA === 'rejected' || sub.jsaStatusPJA === 'rejected') continue;
+
+    const namaProgram = sub.program.namaPaket || getNomorSika(sub.sika);
+
+    // Cek apakah dokumen sudah diupload
+    const hasRemobilisasi = !!(sub as any).dokumenPJA?.remobilisasi;
+    const hasMobilisasi = !!(sub as any).dokumenPJA?.mobilisasi;
+
+    if (!hasRemobilisasi || !hasMobilisasi) {
+      const missing = [];
+      if (!hasRemobilisasi) missing.push('Remobilisasi');
+      if (!hasMobilisasi) missing.push('Mobilisasi');
+
+      notifs.push({
+        id: `pja-dokumen-${sub.id}`,
+        submissionId: sub.id,
+        title: 'Dokumen PJA belum lengkap',
+        message: `${namaProgram} memerlukan upload dokumen ${missing.join(' & ')} sebelum dapat disetujui.`,
+        severity: 'warning',
+        timestamp: sub.updatedAt,
+      });
+    } else {
+      // Dokumen sudah lengkap, tapi PJA belum approve
+      if (!pjaSikaApproved || !pjaJsaApproved) {
+        const pending = [];
+        if (!pjaSikaApproved) pending.push('SIKA');
+        if (!pjaJsaApproved) pending.push('JSA');
+
+        notifs.push({
+          id: `pja-approve-${sub.id}`,
+          submissionId: sub.id,
+          title: 'Dokumen lengkap, menunggu approval PJA',
+          message: `${namaProgram} sudah memiliki dokumen ${hasRemobilisasi ? 'Remobilisasi' : ''}${hasRemobilisasi && hasMobilisasi ? ' & ' : ''}${hasMobilisasi ? 'Mobilisasi' : ''}. Silakan lakukan verifikasi final.`,
+          severity: 'info',
+          timestamp: sub.updatedAt,
+        });
+      }
+    }
+  }
+
+  // 4) SIKA yang sudah disetujui Pemberi tapi mau/sudah berakhir
+  for (const sub of submissions) {
+    const pemberiApproved = sub.sikaStatusPemberi === 'approved' && sub.jsaStatusPemberi === 'approved';
+    if (!pemberiApproved) continue;
+
+    const namaProgram = sub.program.namaPaket || getNomorSika(sub.sika);
+    const tanggalBerakhir = digitsToDateString(sub.sika.berlakuHingga);
+    const sisaHari = hitungSisaHari(tanggalBerakhir);
+    if (sisaHari !== null && sisaHari <= 7) {
+      notifs.push({
+        id: `pja-expiry-${sub.id}`,
         submissionId: sub.id,
         title: sisaHari < 0 ? 'SIKA sudah berakhir' : 'SIKA akan berakhir',
         message:

@@ -5,13 +5,14 @@ import { useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Search, FileText, MapPin,
   CheckCircle, XCircle, Clock, AlertCircle, ChevronRight, Filter,
-  Calendar, ChevronDown, PauseCircle,
+  Calendar, CalendarDays, ChevronDown, PauseCircle,
   TrendingUp, TrendingDown, Activity, ClipboardCheck,
-  Loader2, RefreshCcw
+  Loader2, RefreshCcw, Download,
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import {
   useProgramStore, getNomorSika, getOverallStatus,
-  getRevalidasiOverride, MAX_HARI_REVALIDASI,
+  getRevalidasiOverride, MAX_HARI_REVALIDASI, toLocalDateKey,
 } from '@/store/programStore';
 import type { ApprovalStatus, OverallStatus } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
@@ -42,38 +43,13 @@ interface SIKARow {
   alasanTolakJsa?: string | null;
   sifatPekerjaan: string;
   identifikasiBahaya: string[];
-  // Tanggal-tanggal (YYYY-MM-DD) revalidasi harian yang sudah dikonfirmasi
-  // untuk submission ini — datang dari store, bukan state lokal, supaya
-  // tidak hilang saat reload.
   riwayatRevalidasi: string[];
-  // Pengajuan pemulihan yang sedang berjalan setelah submission ini sempat
-  // "Suspend" (lihat getRevalidasiOverride di store). null = tidak ada
-  // pengajuan yang sedang berjalan.
   revalidasiSuspendRequest: { tanggal: string; status: 'menunggu' | 'ditolak'; alasanTolak?: string | null } | null;
-  // Status perubahan data (sertifikat/pekerja baru dll) yang diajukan lewat
-  // "Kirim Konfirmasi Revalidasi" di Detail Program — terpisah dari status
-  // approval utama, lihat programStore.ts. 'revisi' (bukan 'ditolak'):
-  // perubahan dikembalikan untuk dilengkapi, bukan ditutup permanen — SIKA
-  // & JSA yang sudah aktif tidak terpengaruh.
   perubahanStatus: 'none' | 'menunggu' | 'disetujui' | 'revisi';
   catatanRevisiPerubahan?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
-
-// OverallStatus & getOverallStatus sekarang diimpor dari store (lihat import
-// di atas) supaya Data Management dan Detail Program pakai logika status
-// yang persis sama, tidak ada risiko dua definisi yang diam-diam beda.
-// Begitu juga getRevalidasiOverride/MAX_HARI_REVALIDASI: itu satu-satunya
-// tempat yang menentukan kapan submission 'aktif' dianggap 'suspend' atau
-// otomatis 'closed' karena telat revalidasi — dipakai bareng oleh badge
-// status, tab/counter, dan kolom "Revalidasi" supaya semuanya konsisten.
-
-/* ============================================================
-   BOLD PERTAMINA GAS PALETTE
-   merah #E31E24 · kuning emas #F2A900 · hijau #00954E
-   biru #0E76BC · navy #1B2A4A · abu #4B5568 / #8A94A6 · oranye #EA580C
-============================================================ */
 
 const STATUS_CONFIG: Record<OverallStatus, { label: string; bg: string; icon: any }> = {
   aktif:   { label: 'Aktif',   bg: '#00954E', icon: CheckCircle },
@@ -84,12 +60,6 @@ const STATUS_CONFIG: Record<OverallStatus, { label: string; bg: string; icon: an
   draft:   { label: 'Draft',   bg: '#8A94A6', icon: AlertCircle },
 };
 
-// Status tampilan tambahan khusus untuk baris yang pengajuan
-// perubahan/revalidasinya diminta direvisi oleh Pemberi Kerja
-// (submission.perubahanStatus === 'revisi'). Ini TIDAK menggantikan
-// OverallStatus di store — cuma override tampilan badge di tabel ini
-// supaya pemohon langsung sadar ada revalidasi yang perlu dilengkapi,
-// sekalipun status SIKA/JSA utamanya sendiri masih 'aktif'.
 type DisplayStatus = OverallStatus | 'revisi';
 
 const DISPLAY_STATUS_CONFIG: Record<DisplayStatus, { label: string; bg: string; icon: any }> = {
@@ -131,8 +101,30 @@ function StatusBadge({ status }: { status: DisplayStatus }) {
   );
 }
 
+function StatusPJABadge({ status }: { status: ApprovalStatus }) {
+  if (status === 'approved') {
+    return (
+      <span
+        className="inline-flex items-center h-5 leading-none text-[10px] font-medium px-2 rounded-full whitespace-nowrap text-white shadow-sm"
+        style={{ background: '#00954E' }}
+      >
+        Disetujui
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center h-5 leading-none text-[10px] font-medium px-2 rounded-full whitespace-nowrap text-white shadow-sm"
+      style={{ background: '#F2A900' }}
+    >
+      Menunggu
+    </span>
+  );
+}
+
+
 const renderActiveSlice = (props: any) => {
-  const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, payload, percent } = props;
+  const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props;
   return (
     <g>
       <Sector
@@ -203,23 +195,12 @@ function BarTooltip({ active, payload, label }: any) {
   );
 }
 
-// Field `berlakuHingga` pada data SIKA BUKAN daftar tanggal — melainkan 6
-// karakter digit terpisah [D,D,M,M,Y,Y] hasil input kotak tanggal di form
-// (lihat komponen <DateBoxes/> di halaman review/detail). Sebelumnya kode
-// di sini keliru memperlakukan array 6-digit itu seolah tiap elemennya
-// adalah satu tanggal penuh lalu di-reduce untuk cari "yang paling akhir".
-// Akibatnya string satu-karakter seperti "0"/"1" di-parse oleh
-// `new Date()` secara longgar dan jatuh ke tahun ~1900-an, sehingga
-// selisih hari ke "hari ini" bisa jadi ribuan hari — itulah sumber angka
-// aneh seperti "Berakhir 9102 hari lalu" padahal SIKA-nya masih Aktif.
-// Fungsi ini menggabungkan 6 digit tsb jadi satu string tanggal ISO yang
-// valid dahulu, baru dipakai untuk perhitungan.
 function digitsToDateString(digits?: string[]): string {
   if (!digits || digits.length !== 6 || digits.some((d) => !d)) return '-';
   const [d1, d2, m1, m2, y1, y2] = digits;
   const day = `${d1}${d2}`;
   const month = `${m1}${m2}`;
-  const year = `20${y1}${y2}`; // asumsi tahun di abad 21 (20YY)
+  const year = `20${y1}${y2}`;
   const iso = `${year}-${month}-${day}`;
   return isNaN(new Date(iso).getTime()) ? '-' : iso;
 }
@@ -274,28 +255,12 @@ function filterByTime(rows: SIKARow[], filter: TimeFilterType, customRange?: { s
   });
 }
 
-/* ============================================================
-   REVALIDASI — sehari sekali, maksimal 7 hari sejak tanggal
-   pengajuan. Begitu hari ini sudah divalidasi, aksi terkunci
-   sampai hari berikutnya (locking berbasis tanggal kalender,
-   otomatis reset saat berganti hari).
-
-   Kalau kemarin TIDAK divalidasi, submission otomatis dianggap
-   "Suspend" (lihat getRevalidasiOverride yang diimpor dari store) dan
-   pemulihannya WAJIB lewat approval Pemberi Kerja — beda dari
-   revalidasi harian biasa yang cukup self-certify.
-============================================================ */
-
 type RevalidasiDayStatus = 'validated' | 'due' | 'missed' | 'upcoming';
 
 interface RevalidasiDay {
   date: string;
   dayNumber: number;
   status: RevalidasiDayStatus;
-}
-
-function toDateKey(d: Date): string {
-  return d.toISOString().split('T')[0];
 }
 
 function formatDateID(dateStr: string): string {
@@ -324,7 +289,7 @@ function getRevalidasiDays(tanggalPengajuan: string, validatedDates: string[]): 
   for (let i = 0; i < MAX_HARI_REVALIDASI; i++) {
     const d = new Date(start);
     d.setDate(start.getDate() + i);
-    const key = toDateKey(d);
+    const key = toLocalDateKey(d);
     let status: RevalidasiDayStatus;
     if (validatedDates.includes(key)) status = 'validated';
     else if (d.getTime() === today.getTime()) status = 'due';
@@ -336,10 +301,10 @@ function getRevalidasiDays(tanggalPengajuan: string, validatedDates: string[]): 
 }
 
 const REVALIDASI_SEGMENT_COLOR: Record<RevalidasiDayStatus, string> = {
-  validated: '#00954E', // hijau — sudah direvalidasi hari itu
-  due: '#E31E24',       // merah — hari ini, belum divalidasi
-  missed: '#E31E24',    // merah — hari itu terlewat tanpa revalidasi (pemicu Suspend)
-  upcoming: '#E2E5EA',  // abu netral — belum jadi giliran hari itu
+  validated: '#00954E',
+  due: '#E31E24',
+  missed: '#E31E24',
+  upcoming: '#E2E5EA',
 };
 
 function RevalidasiCell({
@@ -365,9 +330,6 @@ function RevalidasiCell({
     return <span className="text-[10px] text-gray-300 italic">-</span>;
   }
 
-  // Satu-satunya sumber kebenaran soal suspend/auto-closed — sama persis
-  // dengan yang dipakai getFinalStatus() di bawah untuk badge status,
-  // supaya kolom "Revalidasi" dan badge "Status" tidak pernah beda cerita.
   const override = baseStatus === 'aktif' ? getRevalidasiOverride(tanggalPengajuan, validatedDates) : null;
   const isSuspended = override === 'suspend';
   const isAutoClosed = override === 'closed';
@@ -385,16 +347,21 @@ function RevalidasiCell({
 
   return (
     <div className="flex flex-col gap-1.5 w-40">
-      {/* Baris atas: progres hari + status singkat */}
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-bold text-gray-600">
           Hari {isAutoClosed ? MAX_HARI_REVALIDASI : hariKeDitampilkan}
           <span className="font-medium text-gray-300">/{MAX_HARI_REVALIDASI}</span>
         </span>
-        {sudahValidasiHariIni && !isAutoClosed && !isSuspended && (
-          <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold" style={{ color: '#00954E' }}>
-            <CheckCircle size={9} strokeWidth={3} /> Tervalidasi
-          </span>
+        {!isAutoClosed && !isSuspended && (
+          sudahValidasiHariIni ? (
+            <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold" style={{ color: '#00954E' }}>
+              <CheckCircle size={9} strokeWidth={3} /> Tervalidasi
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold" style={{ color: '#E31E24' }}>
+              <XCircle size={9} strokeWidth={3} /> Belum Validasi
+            </span>
+          )
         )}
         {isSuspended && (
           <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold" style={{ color: '#EA580C' }}>
@@ -414,15 +381,12 @@ function RevalidasiCell({
         ))}
       </div>
 
-      {/* Lewat batas hari revalidasi → otomatis Closed, bukan lagi Aktif */}
       {isAutoClosed && (
         <p className="text-[10px] font-medium leading-snug" style={{ color: '#4B5568' }}>
           Batas {MAX_HARI_REVALIDASI} hari terlampaui — SIKA otomatis Closed. Ajukan SIKA baru.
         </p>
       )}
 
-      {/* Suspend karena kemarin tidak direvalidasi — pemulihan wajib lewat
-          approval Pemberi Kerja, bukan self-certify langsung. */}
       {!isAutoClosed && isSuspended && (
         <div className="flex flex-col gap-1">
           <p className="text-[10px] font-medium leading-snug" style={{ color: '#EA580C' }}>
@@ -453,9 +417,6 @@ function RevalidasiCell({
         </div>
       )}
 
-      {/* Perubahan/revalidasi yang diajukan pemohon diminta direvisi Pemberi
-          Kerja — beri jalan keluar yang jelas, bukan cuma teks statis, supaya
-          pemohon langsung tahu langkah selanjutnya. */}
       {!isAutoClosed && !isSuspended && perubahanPerluRevisi && (
         <div className="flex flex-col gap-1">
           <p className="text-[10px] font-medium leading-snug" style={{ color: '#E31E24' }}>
@@ -526,14 +487,6 @@ function RevalidasiModal({
   const toggle = (key: keyof typeof confirmasi) =>
     setConfirmasi((prev) => ({ ...prev, [key]: !prev[key] }));
 
-  // Jika pemohon menandai perlu menambah sertifikat/pekerja baru dll, muat
-  // dulu data submission ini ke draft aktif (openSubmission) supaya form
-  // Program/SIKA/JSA terisi dengan data yang SUDAH ADA — pemohon tinggal
-  // melengkapi/mengubah bagian yang perlu, bukan mengisi dari kosong.
-  // Setelah selesai di halaman Detail Program, tombol "Kirim Konfirmasi
-  // Revalidasi" di sana yang mengirim perubahan ini ke Pemberi Kerja.
-  // Sekali dicentang, pilihan ini terkunci (tidak bisa di-uncheck) karena
-  // pengguna akan segera berpindah halaman.
   const handleTogglePerluTambahan = () => {
     if (perluTambahan || redirecting) return;
     setPerluTambahan(true);
@@ -556,7 +509,6 @@ function RevalidasiModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[92vh] flex flex-col">
 
-        {/* HEADER */}
         <div
           className="px-6 py-4 flex items-center justify-between shrink-0"
           style={{
@@ -576,7 +528,6 @@ function RevalidasiModal({
         </div>
 
         <div className="overflow-y-auto">
-          {/* INFO PROGRAM */}
           <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/60">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -608,88 +559,85 @@ function RevalidasiModal({
               disabled={redirecting}
               className={`space-y-4 transition-opacity duration-200 ${redirecting ? 'opacity-40 pointer-events-none' : ''}`}
             >
-              {/* CHECKLIST KONFIRMASI */}
-<div>
-  <div className="flex items-center justify-between mb-2">
-    <p className="text-[11px] uppercase tracking-wide text-gray-500 font-bold">
-      Konfirmasi Kondisi Lapangan
-    </p>
-    <span className="text-[10px] font-semibold text-gray-400">{jumlahTerkonfirmasi}/{ITEMS.length}</span>
-  </div>
-  <div className="border border-gray-100 rounded-xl divide-y divide-gray-100 overflow-hidden">
-    {ITEMS.map((item) => {
-      const checked = confirmasi[item.key];
-      return (
-        <label
-          key={item.key}
-          className={`flex items-start gap-3 text-xs px-4 py-2.5 cursor-pointer transition ${
-            checked ? 'bg-[#00954E]/[0.14]' : 'bg-white hover:bg-gray-50'
-          }`}
-          style={{ borderLeft: `4px solid ${checked ? '#00954E' : 'transparent'}` }}
-        >
-          <span
-            className={`mt-0.5 w-4.5 h-4.5 rounded-md border shrink-0 flex items-center justify-center transition ${
-              checked ? 'bg-[#00954E] border-[#00954E]' : 'border-gray-300 bg-white'
-            }`}
-          >
-            {checked && <CheckCircle size={11} className="text-white" strokeWidth={3} />}
-          </span>
-          <input
-            type="checkbox"
-            checked={checked}
-            onChange={() => toggle(item.key)}
-            className="sr-only"
-          />
-          <span className={`leading-relaxed ${checked ? 'text-gray-700' : 'text-gray-600'}`}>
-            {item.label}
-          </span>
-        </label>
-      );
-    })}
-  </div>
-</div>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[11px] uppercase tracking-wide text-gray-500 font-bold">
+                    Konfirmasi Kondisi Lapangan
+                  </p>
+                  <span className="text-[10px] font-semibold text-gray-400">{jumlahTerkonfirmasi}/{ITEMS.length}</span>
+                </div>
+                <div className="border border-gray-100 rounded-xl divide-y divide-gray-100 overflow-hidden">
+                  {ITEMS.map((item) => {
+                    const checked = confirmasi[item.key];
+                    return (
+                      <label
+                        key={item.key}
+                        className={`flex items-start gap-3 text-xs px-4 py-2.5 cursor-pointer transition ${
+                          checked ? 'bg-[#00954E]/[0.14]' : 'bg-white hover:bg-gray-50'
+                        }`}
+                        style={{ borderLeft: `4px solid ${checked ? '#00954E' : 'transparent'}` }}
+                      >
+                        <span
+                          className={`mt-0.5 w-4.5 h-4.5 rounded-md border shrink-0 flex items-center justify-center transition ${
+                            checked ? 'bg-[#00954E] border-[#00954E]' : 'border-gray-300 bg-white'
+                          }`}
+                        >
+                          {checked && <CheckCircle size={11} className="text-white" strokeWidth={3} />}
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggle(item.key)}
+                          className="sr-only"
+                        />
+                        <span className={`leading-relaxed ${checked ? 'text-gray-700' : 'text-gray-600'}`}>
+                          {item.label}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
 
-{/* PERUBAHAN TAMBAHAN */}
-<div
-  className={`border rounded-xl overflow-hidden transition-colors ${
-    perluTambahan ? '' : 'border-gray-200'
-  }`}
-  style={perluTambahan ? { borderColor: '#F2A900', background: '#F2A90014' } : undefined}
->
-  <label className="flex items-start gap-3 text-xs px-4 py-2.5 cursor-pointer border-l-4 border-transparent">
-    <span
-      className={`mt-0.5 w-4.5 h-4.5 rounded-md border shrink-0 flex items-center justify-center transition ${
-        perluTambahan ? '' : 'border-gray-300 bg-white'
-      }`}
-      style={perluTambahan ? { background: '#F2A900', borderColor: '#F2A900' } : undefined}
-    >
-      {perluTambahan && <CheckCircle size={11} className="text-white" strokeWidth={3} />}
-    </span>
-    <input
-      type="checkbox"
-      checked={perluTambahan}
-      onChange={handleTogglePerluTambahan}
-      className="sr-only"
-    />
-    <div className="flex-1 min-w-0 space-y-1.5">
-      <span className="font-semibold text-gray-700 leading-relaxed block wrap-break-word">
-        Perlu menambah sertifikat, pekerja baru, atau perubahan lain?
-      </span>
-      <p className="text-[10px] font-normal text-gray-500 leading-relaxed wrap-break-word">
-        Kamu akan diarahkan ke form pengajuan SIKA baru untuk melengkapi perubahan ini,
-        dari pengisian data sampai persetujuan selesai.
-      </p>
-      {redirecting && (
-        <div className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-700">
-          <Loader2 size={11} className="animate-spin shrink-0" />
-          Mengarahkan ke form pengajuan baru...
-        </div>
-      )}
-    </div>
-  </label>
-</div>
+              <div
+                className={`border rounded-xl overflow-hidden transition-colors ${
+                  perluTambahan ? '' : 'border-gray-200'
+                }`}
+                style={perluTambahan ? { borderColor: '#F2A900', background: '#F2A90014' } : undefined}
+              >
+                <label className="flex items-start gap-3 text-xs px-4 py-2.5 cursor-pointer border-l-4 border-transparent">
+                  <span
+                    className={`mt-0.5 w-4.5 h-4.5 rounded-md border shrink-0 flex items-center justify-center transition ${
+                      perluTambahan ? '' : 'border-gray-300 bg-white'
+                    }`}
+                    style={perluTambahan ? { background: '#F2A900', borderColor: '#F2A900' } : undefined}
+                  >
+                    {perluTambahan && <CheckCircle size={11} className="text-white" strokeWidth={3} />}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={perluTambahan}
+                    onChange={handleTogglePerluTambahan}
+                    className="sr-only"
+                  />
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <span className="font-semibold text-gray-700 leading-relaxed block wrap-break-word">
+                      Perlu menambah sertifikat, pekerja baru, atau perubahan lain?
+                    </span>
+                    <p className="text-[10px] font-normal text-gray-500 leading-relaxed wrap-break-word">
+                      Kamu akan diarahkan ke form pengajuan SIKA baru untuk melengkapi perubahan ini,
+                      dari pengisian data sampai persetujuan selesai.
+                    </p>
+                    {redirecting && (
+                      <div className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-700">
+                        <Loader2 size={11} className="animate-spin shrink-0" />
+                        Mengarahkan ke form pengajuan baru...
+                      </div>
+                    )}
+                  </div>
+                </label>
+              </div>
 
-              {/* CATATAN */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide">
                   Catatan <span className="font-normal normal-case text-gray-400">(opsional)</span>
@@ -707,15 +655,14 @@ function RevalidasiModal({
             </fieldset>
 
             <p className="text-[10px] text-gray-400 leading-relaxed">
-            Revalidasi harian bertujuan memastikan kondisi pekerjaan masih sesuai dengan SIKA dan JSA yang telah disetujui. 
-            Wajib dilakukan <span className="font-semibold text-gray-500">sekali sehari</span>, paling lambat{' '}
-            <span className="font-semibold text-gray-500">{MAX_HARI_REVALIDASI} hari</span> sejak tanggal pengajuan. 
-            Jika melewati batas tersebut, SIKA otomatis Closed dan Anda harus mengajukan SIKA baru.
-          </p>
+              Revalidasi harian bertujuan memastikan kondisi pekerjaan masih sesuai dengan SIKA dan JSA yang telah disetujui.
+              Wajib dilakukan <span className="font-semibold text-gray-500">sekali sehari</span>, paling lambat{' '}
+              <span className="font-semibold text-gray-500">{MAX_HARI_REVALIDASI} hari</span> sejak tanggal pengajuan.
+              Jika melewati batas tersebut, SIKA otomatis Closed dan Anda harus mengajukan SIKA baru.
+            </p>
           </div>
         </div>
 
-        {/* FOOTER */}
         <div className="px-6 py-3.5 border-t border-gray-100 flex items-center justify-end gap-2 bg-gray-50/60 shrink-0">
           <button
             onClick={onClose}
@@ -744,8 +691,6 @@ function RevalidasiModal({
   );
 }
 
-/* ============================================================ */
-
 export default function PemohonMonitoringPage() {
   const router = useRouter();
   const {
@@ -762,6 +707,8 @@ export default function PemohonMonitoringPage() {
   const [search, setSearch] = useState('');
   const [filterLokasi, setFilterLokasi] = useState('');
   const [filterSifat, setFilterSifat] = useState('');
+  const [filterPelaksana, setFilterPelaksana] = useState('');
+  const [filterKedaluwarsa, setFilterKedaluwarsa] = useState<'' | '7' | '30' | 'lewat'>('');
   const [filterAreaChart, setFilterAreaChart] = useState('');
   const [showFilter, setShowFilter] = useState(false);
   const [activePieIndex, setActivePieIndex] = useState<number | undefined>(undefined);
@@ -773,16 +720,10 @@ export default function PemohonMonitoringPage() {
     end: '',
   });
   const [showCustomRange, setShowCustomRange] = useState(false);
+  const [isTimeDropdownOpen, setIsTimeDropdownOpen] = useState(false);
 
-  // Satu baris per submission yang sudah di-"Request Review" oleh pemohon
-  // (lihat submitToPemberi di store). Draft yang belum pernah disubmit
-  // sengaja tidak muncul di sini.
   const rows: SIKARow[] = useMemo(() => {
     return submissions.map((sub): SIKARow => {
-      // FIX: `berlakuHingga` adalah array 6-digit [D,D,M,M,Y,Y], bukan
-      // daftar tanggal — jadi digabung dulu jadi satu tanggal ISO, bukan
-      // di-reduce seolah tiap elemen adalah tanggal terpisah (itu bug lama
-      // yang menyebabkan "Berakhir 9102 hari lalu").
       const tanggalBerakhirSIKA = digitsToDateString(sub.sika.berlakuHingga);
 
       return {
@@ -798,8 +739,6 @@ export default function PemohonMonitoringPage() {
         jsaStatusPemberi: sub.jsaStatusPemberi,
         sikaStatusPJA: sub.sikaStatusPJA,
         jsaStatusPJA: sub.jsaStatusPJA,
-        // Digabung dari sisi Pemberi & PJA supaya alasan penolakan tetap
-        // tampil walau yang menolak PJA, bukan cuma Pemberi Kerja.
         alasanTolakSika: sub.alasanTolakSikaPemberi || sub.alasanTolakSikaPJA,
         alasanTolakJsa: sub.alasanTolakJsaPemberi || sub.alasanTolakJsaPJA,
         sifatPekerjaan: sub.sika.sifatPekerjaan || '-',
@@ -814,10 +753,6 @@ export default function PemohonMonitoringPage() {
     });
   }, [submissions]);
 
-  // Status dasar (murni approval Pemberi/PJA) + lapisan override revalidasi
-  // (Suspend / auto-Closed) digabung jadi satu di sini — satu-satunya
-  // tempat yang menentukan status final tiap baris, dipakai untuk tab,
-  // counter, badge, dan chart supaya semuanya konsisten.
   const getFinalStatus = (row: SIKARow): OverallStatus => {
     const base = getOverallStatus(row.sikaStatusPemberi, row.jsaStatusPemberi, row.sikaStatusPJA, row.jsaStatusPJA);
     if (base !== 'aktif') return base;
@@ -825,12 +760,6 @@ export default function PemohonMonitoringPage() {
     return override ?? base;
   };
 
-  // Override tampilan badge jadi "Perlu Revisi" kalau Pemberi Kerja minta
-  // revisi atas pengajuan perubahan (revalidasi) — status ini terpisah dari
-  // getFinalStatus, tapi perlu tampil di badge biar pemohon langsung sadar
-  // ada yang perlu dilengkapi. Status 'closed' (baik dari approval PJA
-  // maupun auto-closed karena lewat batas revalidasi) lebih final dan tidak
-  // perlu ditimpa oleh overlay 'revisi'.
   const getDisplayStatus = (row: SIKARow): DisplayStatus => {
     const final = getFinalStatus(row);
     if (final === 'closed') return 'closed';
@@ -860,10 +789,18 @@ export default function PemohonMonitoringPage() {
 
       const matchLokasi = !filterLokasi || r.lokasi === filterLokasi;
       const matchSifat = !filterSifat || r.sifatPekerjaan === filterSifat;
+      const matchPelaksana = !filterPelaksana || r.pelaksana === filterPelaksana;
 
-      return matchTab && matchSearch && matchLokasi && matchSifat;
+      const sisaHari = hitungSisaHari(r.tanggalBerakhirSIKA);
+      const matchKedaluwarsa =
+        !filterKedaluwarsa ? true :
+        filterKedaluwarsa === '7' ? (sisaHari !== null && sisaHari >= 0 && sisaHari <= 7) :
+        filterKedaluwarsa === '30' ? (sisaHari !== null && sisaHari >= 0 && sisaHari <= 30) :
+        filterKedaluwarsa === 'lewat' ? (sisaHari !== null && sisaHari < 0) : true;
+
+      return matchTab && matchSearch && matchLokasi && matchSifat && matchPelaksana && matchKedaluwarsa;
     });
-  }, [timeFilteredRows, activeTab, search, filterLokasi, filterSifat]);
+  }, [timeFilteredRows, activeTab, search, filterLokasi, filterSifat, filterPelaksana, filterKedaluwarsa]);
 
   const counts = useMemo(() => ({
     semua: timeFilteredRows.length,
@@ -888,6 +825,7 @@ export default function PemohonMonitoringPage() {
   ];
 
   const allSifat = [...new Set(rows.map(r => r.sifatPekerjaan).filter(s => s && s !== '-'))];
+  const allPelaksana = [...new Set(rows.map(r => r.pelaksana).filter(p => p && p !== '-'))].sort();
 
   const statusChartData = useMemo(() => {
     const source = !filterAreaChart
@@ -914,9 +852,6 @@ export default function PemohonMonitoringPage() {
   const pieTotal = useMemo(() => statusChartData.reduce((s, d) => s + d.value, 0), [statusChartData]);
 
   const trendData = useMemo(() => {
-    // NOTE: masih dummy/random by design (statistik contoh) — lihat
-    // pembahasan sebelumnya. Ganti ke agregasi asli dari `submissions`
-    // per bulan kalau nanti sudah siap dipakai produksi.
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
     const currentMonth = new Date().getMonth();
     const data = [];
@@ -975,10 +910,10 @@ export default function PemohonMonitoringPage() {
   const TABS: { key: TabType; label: string; color: string }[] = [
     { key: 'semua',   label: 'Semua',   color: 'text-gray-700' },
     { key: 'aktif',   label: 'Aktif',   color: 'text-green-600' },
-    { key: 'suspend', label: 'Suspend', color: 'text-orange-600' },
     { key: 'pending', label: 'Pending', color: 'text-blue-600' },
     { key: 'ditolak', label: 'Ditolak', color: 'text-red-600' },
     { key: 'closed',  label: 'Closed',  color: 'text-gray-500' },
+    { key: 'suspend', label: 'Suspend', color: 'text-orange-600' },
   ];
 
   const revalidasiModalRow = revalidasiModalRowId ? rows.find(r => r.id === revalidasiModalRowId) : undefined;
@@ -986,44 +921,69 @@ export default function PemohonMonitoringPage() {
     ? getRevalidasiOverride(revalidasiModalRow.createdAt || revalidasiModalRow.tanggalKontrak, revalidasiModalRow.riwayatRevalidasi) === 'suspend'
     : false;
 
-  // Kalau row-nya lagi Suspend, submit modal ini bukan self-certify
-  // langsung — tapi mengajukan pemulihan yang perlu approval Pemberi Kerja
-  // (ajukanRevalidasiSuspend). Selain itu (revalidasi harian biasa), tetap
-  // self-certify seperti sebelumnya lewat catatRevalidasi.
   const handleSubmitRevalidasi = (_data: { catatan: string }) => {
     if (!revalidasiModalRowId) return;
     if (revalidasiModalIsSuspend) {
       ajukanRevalidasiSuspend(user?.name || 'Pemohon', revalidasiModalRowId);
     } else {
-      const todayKey = toDateKey(new Date());
+      const todayKey = toLocalDateKey(new Date());
       catatRevalidasi(revalidasiModalRowId, todayKey);
     }
     setRevalidasiModalRowId(null);
   };
 
   const handleBuatPengajuanBaru = () => {
-    // Kosongkan draft aktif dulu supaya form Program tidak ke-prefill data
-    // pengajuan yang baru saja disubmit, dan supaya pengajuan baru ini
-    // tidak menimpa submission yang sudah ada di riwayat.
     startNewDraft();
     router.push('/dashboard/pemohon/program/new');
   };
 
   const handleLihatDetail = (rowId: string) => {
-    // Muat snapshot submission ini ke draft aktif supaya halaman Detail
-    // Program (yang membaca program/sika/jsa langsung dari store) otomatis
-    // menampilkan data pengajuan ini.
     openSubmission(rowId);
     router.push('/dashboard/pemohon/jsa/detail');
   };
 
-  // Pemberi Kerja meminta revisi atas pengajuan perubahan (revalidasi) —
-  // muat data submission ini ke draft aktif supaya pemohon bisa langsung
-  // melengkapi/memperbaiki data yang diminta, lalu mengirim ulang lewat
-  // "Kirim Konfirmasi Revalidasi" di Detail Program setelah selesai.
   const handleAjukanUlangPerubahan = (rowId: string) => {
     openSubmission(rowId);
     router.push('/dashboard/pemohon/program/new');
+  };
+
+  const handleExportExcel = () => {
+    const exportRows = filtered.map((row, i) => {
+      const status = DISPLAY_STATUS_CONFIG[getDisplayStatus(row)].label;
+      const sisaHari = hitungSisaHari(row.tanggalBerakhirSIKA);
+      return {
+        'No': i + 1,
+        'Nama Program': row.namaProgram,
+        'No SIKA': row.noSIKA,
+        'Lokasi/Area': row.lokasi,
+        'Pelaksana': row.pelaksana,
+        'Sifat Pekerjaan': row.sifatPekerjaan,
+        'Tanggal Kontrak': row.tanggalKontrak,
+        'Tanggal Berakhir SIKA': row.tanggalBerakhirSIKA,
+        'Sisa Hari': sisaHari ?? '-',
+        'SIKA - PJA': row.sikaStatusPJA === 'approved' ? 'Disetujui' : 'Menunggu',
+        'JSA - PJA': row.jsaStatusPJA === 'approved' ? 'Disetujui' : 'Menunggu',
+        'SIKA - Pemberi': APPROVAL_BADGE[row.sikaStatusPemberi].label,
+        'JSA - Pemberi': APPROVAL_BADGE[row.jsaStatusPemberi].label,
+        'Status Akhir': status,
+        'Alasan Tolak': row.alasanTolakSika || row.alasanTolakJsa || '-',
+        'Status Perubahan': row.perubahanStatus !== 'none' ? row.perubahanStatus : '-',
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    worksheet['!cols'] = [
+      { wch: 5 }, { wch: 30 }, { wch: 16 }, { wch: 24 }, { wch: 22 },
+      { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 9 }, { wch: 12 },
+      { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 14 },
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Monitoring SIKA');
+
+    const tanggal = new Date().toISOString().split('T')[0];
+    const tabLabel = TABS.find(t => t.key === activeTab)?.label || 'Semua';
+    XLSX.writeFile(workbook, `Monitoring-SIKA_${tabLabel}_${tanggal}.xlsx`);
   };
 
   const timeFilterLabels = {
@@ -1037,39 +997,30 @@ export default function PemohonMonitoringPage() {
   return (
     <div className="min-h-screen bg-gray-100">
 
-   {/* HEADER */}
-    <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-      <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
-        <img src="/logosika.svg" alt="SIKA" className="h-8 object-contain" style={{ marginTop: '3px' }} />
-        <div className="w-px h-10 bg-gray-200" />
-        <div className="flex flex-col leading-tight">
-          <span className="text-sm font-bold text-gray-800">Monitoring SIKA</span>
-          <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
-            Status &amp; Tracking Dokumen
-          </span>
+      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
+          <div className="flex flex-col leading-tight border-l-4 border-blue-600 pl-3">
+            <span className="text-sm font-bold text-gray-800 tracking-tight">Monitoring SIKA</span>
+            <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
+              Status &amp; Tracking Dokumen
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-4" style={{ paddingRight: '38px' }}>
+          <img src="/logopertaminagasfull.svg" alt="Pertamina Gas" className="h-9 object-contain" />
         </div>
       </div>
 
-      <div className="flex items-center gap-4" style={{ paddingRight: '38px' }}>
-        <img
-          src="/logopertaminagasfull.svg"
-          alt="Pertamina Gas"
-          className="h-9 object-contain"
-        />
-      </div>
-    </div>
+      <div className="px-6 py-6 space-y-4">
 
-    <div className="px-6 py-6 space-y-4"> 
-
-        {/* STATISTIK - SEJAJAR 6 KOLOM (BOLD PERTAMINA GAS) */}
         <div className="grid gap-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: '0.75rem' }}>
           {[
             { label: 'Total SIKA', value: counts.semua,   bg: '#1B2A4A', sub: 'Semua pengajuan' },
             { label: 'Aktif',      value: counts.aktif,   bg: '#00954E', sub: 'Disetujui Pemberi' },
-            { label: 'Suspend',    value: counts.suspend, bg: '#EA580C', sub: 'Telat revalidasi' },
             { label: 'Pending',    value: counts.pending, bg: '#0E76BC', sub: 'Menunggu review' },
             { label: 'Ditolak',    value: counts.ditolak, bg: '#E31E24', sub: 'Perlu revisi' },
             { label: 'Closed',     value: counts.closed,  bg: '#4B5568', sub: 'Selesai diproses' },
+            { label: 'Suspend',    value: counts.suspend, bg: '#EA580C', sub: 'Telat revalidasi' },
           ].map((s) => (
             <div
               key={s.label}
@@ -1083,7 +1034,6 @@ export default function PemohonMonitoringPage() {
           ))}
         </div>
 
-        {/* DASHBOARD CHARTS - FULL WIDTH */}
         <div className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
           <div className="px-6 py-4 flex items-center justify-between border-b border-gray-100" style={{ background: 'linear-gradient(90deg, #ffffff 0%, #f4f9fb 100%)' }}>
             <div className="flex items-center gap-3">
@@ -1096,77 +1046,70 @@ export default function PemohonMonitoringPage() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              {/* Time Filter — segmented control ala dashboard korporat,
-                  ganti dari dropdown menu supaya rentang waktu yang paling
-                  sering dipakai (Hari/Minggu/Bulan/Tahun) langsung terlihat
-                  dan bisa diklik 1x, tanpa perlu buka-tutup menu. */}
-              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-                {(['hari', 'minggu', 'bulan', 'tahun'] as TimeFilterType[]).map((key) => (
-                  <button
-                    key={key}
-                    onClick={() => { setTimeFilter(key); setShowCustomRange(false); }}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all whitespace-nowrap ${
-                      timeFilter === key
-                        ? 'bg-white text-blue-700 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    {timeFilterLabels[key].replace(' Ini', '')}
-                  </button>
-                ))}
-                <div className="relative">
-                  <button
-                    onClick={() => setShowCustomRange((v) => !v)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all whitespace-nowrap ${
-                      timeFilter === 'custom'
-                        ? 'bg-white text-blue-700 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    <Calendar size={12} />
-                    {timeFilter === 'custom' && customRange.start && customRange.end
-                      ? `${customRange.start} – ${customRange.end}`
-                      : 'Custom'}
-                    <ChevronDown size={11} className={`transition-transform ${showCustomRange ? 'rotate-180' : ''}`} />
-                  </button>
-                  {showCustomRange && (
-                    <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-100 p-3.5 z-50 space-y-2.5">
-                      <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Pilih Rentang Tanggal</p>
-                      <div className="space-y-2">
-                        <div>
-                          <label className="text-[10px] text-gray-400 font-medium mb-1 block">Dari</label>
-                          <input
-                            type="date"
-                            value={customRange.start}
-                            onChange={(e) => setCustomRange({ ...customRange, start: e.target.value })}
-                            className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] text-gray-400 font-medium mb-1 block">Sampai</label>
-                          <input
-                            type="date"
-                            value={customRange.end}
-                            onChange={(e) => setCustomRange({ ...customRange, end: e.target.value })}
-                            className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
-                          />
-                        </div>
-                      </div>
+              <div className="relative">
+                <button
+                  onClick={() => setIsTimeDropdownOpen(!isTimeDropdownOpen)}
+                  className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-600 bg-white hover:bg-gray-50 transition shadow-sm"
+                >
+                  <Calendar size={14} />
+                  {timeFilterLabels[timeFilter]}
+                  {timeFilter === 'custom' && customRange.start && customRange.end && (
+                    <span className="text-[10px] text-blue-600 font-medium">
+                      {customRange.start} s/d {customRange.end}
+                    </span>
+                  )}
+                  <ChevronDown size={12} className="text-gray-400" />
+                </button>
+                {isTimeDropdownOpen && (
+                  <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-50">
+                    {(['hari', 'minggu', 'bulan', 'tahun'] as TimeFilterType[]).map((key) => (
                       <button
-                        onClick={() => {
-                          if (customRange.start && customRange.end) {
+                        key={key}
+                        onClick={() => { setTimeFilter(key); setIsTimeDropdownOpen(false); }}
+                        className={`w-full text-left px-4 py-2 text-xs hover:bg-blue-50 transition flex items-center gap-2 ${
+                          timeFilter === key ? 'text-blue-600 font-semibold bg-blue-50' : 'text-gray-600'
+                        }`}
+                      >
+                        <CalendarDays size={14} />
+                        {timeFilterLabels[key]}
+                      </button>
+                    ))}
+                    <div className="border-t border-gray-100 my-1" />
+                    <button
+                      onClick={() => setShowCustomRange(!showCustomRange)}
+                      className="w-full text-left px-4 py-2 text-xs hover:bg-blue-50 transition flex items-center gap-2 text-gray-600"
+                    >
+                      <Calendar size={14} />
+                      Custom Range
+                    </button>
+                    {showCustomRange && (
+                      <div className="px-4 py-3 border-t border-gray-100 space-y-2">
+                        <input
+                          type="date"
+                          value={customRange.start}
+                          onChange={(e) => setCustomRange({ ...customRange, start: e.target.value })}
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs"
+                        />
+                        <input
+                          type="date"
+                          value={customRange.end}
+                          onChange={(e) => setCustomRange({ ...customRange, end: e.target.value })}
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs"
+                        />
+                        <button
+                          onClick={() => {
                             setTimeFilter('custom');
                             setShowCustomRange(false);
-                          }
-                        }}
-                        disabled={!customRange.start || !customRange.end}
-                        className="w-full bg-blue-600 disabled:bg-gray-200 disabled:text-gray-400 text-white text-xs font-semibold py-1.5 rounded-lg hover:bg-blue-700 transition"
-                      >
-                        Terapkan
-                      </button>
-                    </div>
-                  )}
-                </div>
+                            setIsTimeDropdownOpen(false);
+                          }}
+                          className="w-full bg-blue-600 text-white text-xs font-semibold py-1.5 rounded-lg hover:bg-blue-700 transition"
+                        >
+                          Terapkan
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <select
@@ -1180,9 +1123,7 @@ export default function PemohonMonitoringPage() {
             </div>
           </div>
 
-          {/* Charts Grid: Pie 1/4 + Line 3/4 */}
           <div className="p-6 grid grid-cols-4 gap-6">
-            {/* Pie Chart - 1/4 */}
             <div className="col-span-1 border border-gray-100 rounded-xl p-4 flex flex-col bg-linear-to-b from-white to-gray-50/40">
               <p className="text-xs font-bold text-gray-700 mb-1">Distribusi Status</p>
               <p className="text-[10px] text-gray-400 mb-2">
@@ -1244,7 +1185,6 @@ export default function PemohonMonitoringPage() {
               )}
             </div>
 
-            {/* Line Chart - 3/4 */}
             <div className="col-span-3">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-bold text-gray-700">Trend Status 6 Bulan Terakhir</p>
@@ -1324,7 +1264,6 @@ export default function PemohonMonitoringPage() {
             </div>
           </div>
 
-          {/* Lokasi breakdown - BOLD PERTAMINA GAS */}
           <div className="px-6 pb-6 space-y-2.5">
             {lokasiListData.length === 0 ? (
               <p className="text-gray-300 text-xs text-center py-4">Belum ada rincian untuk ditampilkan</p>
@@ -1338,9 +1277,9 @@ export default function PemohonMonitoringPage() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-[10px] font-medium px-2.5 py-1 rounded-full text-white shadow-sm" style={{ background: '#1B2A4A' }}>Total {d.total}</span>
                     <span className="text-[10px] font-medium px-2.5 py-1 rounded-full text-white shadow-sm" style={{ background: '#00954E' }}>Aktif {d.aktif}</span>
-                    <span className="text-[10px] font-medium px-2.5 py-1 rounded-full text-white shadow-sm" style={{ background: '#EA580C' }}>Suspend {d.suspend}</span>
                     <span className="text-[10px] font-medium px-2.5 py-1 rounded-full text-white shadow-sm" style={{ background: '#0E76BC' }}>Pending {d.pending}</span>
                     <span className="text-[10px] font-medium px-2.5 py-1 rounded-full text-white shadow-sm" style={{ background: '#E31E24' }}>Ditolak {d.ditolak}</span>
+                    <span className="text-[10px] font-medium px-2.5 py-1 rounded-full text-white shadow-sm" style={{ background: '#EA580C' }}>Suspend {d.suspend}</span>
                     <span className="text-[10px] font-medium px-2.5 py-1 rounded-full text-white shadow-sm" style={{ background: '#4B5568' }}>Closed {d.closed}</span>
                   </div>
                 </div>
@@ -1349,7 +1288,6 @@ export default function PemohonMonitoringPage() {
           </div>
         </div>
 
-        {/* TABLE SECTION */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
 
           <div className="px-6 py-3 border-b border-gray-100 flex items-center justify-between"
@@ -1362,13 +1300,22 @@ export default function PemohonMonitoringPage() {
               <button
                 onClick={() => setShowFilter(!showFilter)}
                 className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition ${
-                  showFilter || filterLokasi || filterSifat
+                  showFilter || filterLokasi || filterSifat || filterPelaksana || filterKedaluwarsa
                     ? 'bg-white text-blue-700 border-white'
                     : 'bg-white/20 text-white border-white/30 hover:bg-white/30'
                 }`}
               >
                 <Filter size={12} />
-                Filter {(filterLokasi || filterSifat) ? '(aktif)' : ''}
+                Filter {(filterLokasi || filterSifat || filterPelaksana || filterKedaluwarsa) ? '(aktif)' : ''}
+              </button>
+              <button
+                onClick={handleExportExcel}
+                disabled={filtered.length === 0}
+                title="Export data sesuai filter yang sedang aktif ke Excel"
+                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border bg-white/20 text-white border-white/30 hover:bg-white/30 transition disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Download size={12} />
+                Export Excel
               </button>
               <span className="text-xs bg-white/20 text-white px-3 py-1 rounded-full font-medium">
                 {filtered.length} data
@@ -1437,8 +1384,37 @@ export default function PemohonMonitoringPage() {
                   {allSifat.map((s) => <option key={s}>{s}</option>)}
                 </select>
               </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] text-gray-500 font-medium uppercase tracking-wide">Pelaksana / Kontraktor</label>
+                <select
+                  value={filterPelaksana}
+                  onChange={(e) => setFilterPelaksana(e.target.value)}
+                  className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-blue-300 w-48"
+                >
+                  <option value="">Semua Pelaksana</option>
+                  {allPelaksana.map((p) => <option key={p}>{p}</option>)}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] text-gray-500 font-medium uppercase tracking-wide">Masa Berlaku SIKA</label>
+                <select
+                  value={filterKedaluwarsa}
+                  onChange={(e) => setFilterKedaluwarsa(e.target.value as typeof filterKedaluwarsa)}
+                  className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-blue-300 w-48"
+                >
+                  <option value="">Semua</option>
+                  <option value="7">Berakhir ≤ 7 hari</option>
+                  <option value="30">Berakhir ≤ 30 hari</option>
+                  <option value="lewat">Sudah lewat masa berlaku</option>
+                </select>
+              </div>
               <button
-                onClick={() => { setFilterLokasi(''); setFilterSifat(''); }}
+                onClick={() => {
+                  setFilterLokasi('');
+                  setFilterSifat('');
+                  setFilterPelaksana('');
+                  setFilterKedaluwarsa('');
+                }}
                 className="text-xs text-gray-400 hover:text-red-500 transition px-2 py-1.5"
               >
                 Reset filter
@@ -1537,8 +1513,15 @@ export default function PemohonMonitoringPage() {
                             </span>
                           ) : <span className="text-[10px] text-gray-300">-</span>}
                         </td>
-                        <td className="px-3 py-3 align-top"><ApprovalBadge status={row.sikaStatusPJA} /></td>
-                        <td className="px-3 py-3 align-top"><ApprovalBadge status={row.jsaStatusPJA} /></td>
+                        {/* ============================================================
+                            PREMOBILISASI & MOBILISASI — hanya 2 status
+                        ============================================================ */}
+                        <td className="px-3 py-3 align-top">
+                          <StatusPJABadge status={row.sikaStatusPJA} />
+                        </td>
+                        <td className="px-3 py-3 align-top">
+                          <StatusPJABadge status={row.jsaStatusPJA} />
+                        </td>
                         <td className="px-3 py-3 align-top"><ApprovalBadge status={row.sikaStatusPemberi} /></td>
                         <td className="px-3 py-3 align-top"><ApprovalBadge status={row.jsaStatusPemberi} /></td>
                         <td className="px-3 py-3 align-top">

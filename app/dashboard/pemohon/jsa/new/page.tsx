@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useProgramStore } from '@/store/programStore';
 
@@ -122,6 +122,16 @@ export default function DetailJSAPage() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // Order the row fields are visited in when pressing Enter (like Tab).
+  const ROW_FIELD_ORDER: (keyof JSARow)[] = [
+    'langkah', 'peralatan', 'potensiBahaya', 'tingkatRisiko', 'mitigasi', 'penanggungjawab',
+  ];
+
+  // Refs to every text input in the JSA table, keyed by `${rowId}:${field}`,
+  // so Enter can move focus to the next field or the next/new row.
+  const fieldRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const fieldRefKey = (rowId: string, field: keyof JSARow) => `${rowId}:${field}`;
+
   const handleMetaChange = (field: string, value: string) => {
     setMeta((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) setErrors((prev) => ({ ...prev, [field]: '' }));
@@ -143,7 +153,11 @@ export default function DetailJSAPage() {
       prev.map((sec) => {
         if (sec.key !== sectionKey) return sec;
         const nextNum = sec.rows.length + 1;
-        return { ...sec, rows: [...sec.rows, makeRow(`${sectionKey}${nextNum}`)] };
+        const newId = `${sectionKey}${nextNum}`;
+        setTimeout(() => {
+          fieldRefs.current[fieldRefKey(newId, 'langkah')]?.focus();
+        }, 0);
+        return { ...sec, rows: [...sec.rows, makeRow(newId)] };
       })
     );
   };
@@ -154,6 +168,38 @@ export default function DetailJSAPage() {
         sec.key !== sectionKey ? sec : { ...sec, rows: sec.rows.filter((r) => r.id !== rowId) }
       )
     );
+  };
+
+  const handleFieldKeyDown = (
+    sectionKey: string,
+    rowId: string,
+    field: keyof JSARow,
+    e: React.KeyboardEvent<HTMLInputElement>
+  ) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+
+    const fieldIdx = ROW_FIELD_ORDER.indexOf(field);
+    const isLastField = fieldIdx === ROW_FIELD_ORDER.length - 1;
+
+    if (!isLastField) {
+      // Move to the next field in the same row, just like Tab.
+      const nextField = ROW_FIELD_ORDER[fieldIdx + 1];
+      fieldRefs.current[fieldRefKey(rowId, nextField)]?.focus();
+      return;
+    }
+
+    // We're on the last field (Penanggungjawab) — go to the next row's
+    // first field if one exists, otherwise add a new row.
+    const sec = sections.find((s) => s.key === sectionKey);
+    const rowIdx = sec ? sec.rows.findIndex((r) => r.id === rowId) : -1;
+    const nextRow = sec && rowIdx >= 0 ? sec.rows[rowIdx + 1] : undefined;
+
+    if (nextRow) {
+      fieldRefs.current[fieldRefKey(nextRow.id, 'langkah')]?.focus();
+    } else {
+      addRow(sectionKey);
+    }
   };
 
   const togglePPE = (rowIdx: number, colIdx: number) => {
@@ -477,22 +523,86 @@ export default function DetailJSAPage() {
                           >
                             <td className="px-2 py-2 text-center font-semibold text-gray-400 border-r border-gray-200 w-8">{rowIdx + 1}</td>
                             <td className="px-2 py-2 border-r border-gray-200">
-                              <input type="text" value={row.langkah} onChange={(e) => updateRow(sec.key, row.id, 'langkah', e.target.value)} placeholder="Langkah pekerjaan..." className="w-full outline-none text-xs text-gray-800 placeholder-gray-300 rounded px-2 py-1.5 transition" style={inputStyle} onFocus={inputFocus} onBlur={inputBlur} />
+                              <input
+                                type="text"
+                                value={row.langkah}
+                                onChange={(e) => updateRow(sec.key, row.id, 'langkah', e.target.value)}
+                                onKeyDown={(e) => handleFieldKeyDown(sec.key, row.id, 'langkah', e)}
+                                ref={(el) => { fieldRefs.current[fieldRefKey(row.id, 'langkah')] = el; }}
+                                placeholder="Langkah pekerjaan..."
+                                className="w-full outline-none text-xs text-gray-800 placeholder-gray-300 rounded px-2 py-1.5 transition"
+                                style={inputStyle}
+                                onFocus={inputFocus}
+                                onBlur={inputBlur}
+                              />
                             </td>
                             <td className="px-2 py-2 border-r border-gray-200">
-                              <input type="text" value={row.peralatan} onChange={(e) => updateRow(sec.key, row.id, 'peralatan', e.target.value)} placeholder="Peralatan/material..." className="w-full outline-none text-xs text-gray-800 placeholder-gray-300 rounded px-2 py-1.5 transition" style={inputStyle} onFocus={inputFocus} onBlur={inputBlur} />
+                              <input
+                                type="text"
+                                value={row.peralatan}
+                                onChange={(e) => updateRow(sec.key, row.id, 'peralatan', e.target.value)}
+                                onKeyDown={(e) => handleFieldKeyDown(sec.key, row.id, 'peralatan', e)}
+                                ref={(el) => { fieldRefs.current[fieldRefKey(row.id, 'peralatan')] = el; }}
+                                placeholder="Peralatan/material..."
+                                className="w-full outline-none text-xs text-gray-800 placeholder-gray-300 rounded px-2 py-1.5 transition"
+                                style={inputStyle}
+                                onFocus={inputFocus}
+                                onBlur={inputBlur}
+                              />
                             </td>
                             <td className="px-2 py-2 border-r border-gray-200">
-                              <input type="text" value={row.potensiBahaya} onChange={(e) => updateRow(sec.key, row.id, 'potensiBahaya', e.target.value)} placeholder="Potensi bahaya..." className="w-full outline-none text-xs text-gray-800 placeholder-gray-300 rounded px-2 py-1.5 transition" style={inputStyle} onFocus={inputFocus} onBlur={inputBlur} />
+                              <input
+                                type="text"
+                                value={row.potensiBahaya}
+                                onChange={(e) => updateRow(sec.key, row.id, 'potensiBahaya', e.target.value)}
+                                onKeyDown={(e) => handleFieldKeyDown(sec.key, row.id, 'potensiBahaya', e)}
+                                ref={(el) => { fieldRefs.current[fieldRefKey(row.id, 'potensiBahaya')] = el; }}
+                                placeholder="Potensi bahaya..."
+                                className="w-full outline-none text-xs text-gray-800 placeholder-gray-300 rounded px-2 py-1.5 transition"
+                                style={inputStyle}
+                                onFocus={inputFocus}
+                                onBlur={inputBlur}
+                              />
                             </td>
                             <td className="px-1.5 py-2 text-center border-r border-gray-200">
-                              <input type="text" value={row.tingkatRisiko} onChange={(e) => updateRow(sec.key, row.id, 'tingkatRisiko', e.target.value)} placeholder="Risiko" style={{ background: risk.bg, color: risk.text, border: `1.5px solid ${risk.text}60`, fontWeight: 600, boxShadow: '0 1px 2px rgba(0,0,0,0.06)' }} className="w-full rounded-full text-xs py-1 px-2 text-center outline-none placeholder-gray-300 transition" />
+                              <input
+                                type="text"
+                                value={row.tingkatRisiko}
+                                onChange={(e) => updateRow(sec.key, row.id, 'tingkatRisiko', e.target.value)}
+                                onKeyDown={(e) => handleFieldKeyDown(sec.key, row.id, 'tingkatRisiko', e)}
+                                ref={(el) => { fieldRefs.current[fieldRefKey(row.id, 'tingkatRisiko')] = el; }}
+                                placeholder="Risiko"
+                                style={{ background: risk.bg, color: risk.text, border: `1.5px solid ${risk.text}60`, fontWeight: 600, boxShadow: '0 1px 2px rgba(0,0,0,0.06)' }}
+                                className="w-full rounded-full text-xs py-1 px-2 text-center outline-none placeholder-gray-300 transition"
+                              />
                             </td>
                             <td className="px-2 py-2 border-r border-gray-200">
-                              <input type="text" value={row.mitigasi} onChange={(e) => updateRow(sec.key, row.id, 'mitigasi', e.target.value)} placeholder="Mitigasi bahaya..." className="w-full outline-none text-xs text-gray-800 placeholder-gray-300 rounded px-2 py-1.5 transition" style={inputStyle} onFocus={inputFocus} onBlur={inputBlur} />
+                              <input
+                                type="text"
+                                value={row.mitigasi}
+                                onChange={(e) => updateRow(sec.key, row.id, 'mitigasi', e.target.value)}
+                                onKeyDown={(e) => handleFieldKeyDown(sec.key, row.id, 'mitigasi', e)}
+                                ref={(el) => { fieldRefs.current[fieldRefKey(row.id, 'mitigasi')] = el; }}
+                                placeholder="Mitigasi bahaya..."
+                                className="w-full outline-none text-xs text-gray-800 placeholder-gray-300 rounded px-2 py-1.5 transition"
+                                style={inputStyle}
+                                onFocus={inputFocus}
+                                onBlur={inputBlur}
+                              />
                             </td>
                             <td className="px-2 py-2 border-r border-gray-200">
-                              <input type="text" value={row.penanggungjawab} onChange={(e) => updateRow(sec.key, row.id, 'penanggungjawab', e.target.value)} placeholder="PJ..." className="w-full outline-none text-xs text-gray-800 placeholder-gray-300 rounded px-2 py-1.5 transition" style={inputStyle} onFocus={inputFocus} onBlur={inputBlur} />
+                              <input
+                                type="text"
+                                value={row.penanggungjawab}
+                                onChange={(e) => updateRow(sec.key, row.id, 'penanggungjawab', e.target.value)}
+                                onKeyDown={(e) => handleFieldKeyDown(sec.key, row.id, 'penanggungjawab', e)}
+                                ref={(el) => { fieldRefs.current[fieldRefKey(row.id, 'penanggungjawab')] = el; }}
+                                placeholder="PJ..."
+                                className="w-full outline-none text-xs text-gray-800 placeholder-gray-300 rounded px-2 py-1.5 transition"
+                                style={inputStyle}
+                                onFocus={inputFocus}
+                                onBlur={inputBlur}
+                              />
                             </td>
                             <td className="px-1 py-2 text-center">
                               {sec.rows.length > 1 && (
