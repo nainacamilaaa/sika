@@ -135,7 +135,7 @@ export default function DashboardPemberi() {
               Approval Management
             </button>
             <button
-              onClick={() => router.push('/dashboard/pemberi/audit_trailpersetujuan')}
+              onClick={() => router.push('/dashboard/pemberi/audit-trailpersetujuan')}
               style={{
                 padding: '12px 36px',
                 borderRadius: '9999px',
