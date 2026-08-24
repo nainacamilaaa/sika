@@ -1,17 +1,13 @@
 'use client';
 
-import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { CheckCircle, XCircle, Clock, FileText, History, Check } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, FileText, History, Check, ChevronLeft } from 'lucide-react';
 import { useProgramStore, getNomorSika } from '@/store/programStore';
 import type { ApprovalStatus, ApprovalLogEntry, PerubahanStatus, SertifikatData, SikaData } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
-
-/* =========================================================================
- * Printed-form building blocks — sama persis dengan yang dipakai di halaman
- * Detail Program milik Pemohon, supaya bentuk dokumennya konsisten. Bagian
- * approval (setuju/tolak SIKA & JSA) tetap fungsi khusus Pemberi Kerja.
- * ======================================================================= */
+import jsPDF from 'jspdf';
+import { toPng } from 'html-to-image';
 
 function FormField({
   label,
@@ -185,16 +181,6 @@ const getRiskBadgeStyle = (value: string) => {
   return { bg: '#f1f5f9', text: '#64748b' };
 };
 
-/* =========================================================================
- * Detail Sertifikat Kerja — sama persis dengan yang dipakai di halaman
- * Detail Program milik Pemohon (sika/detail/page.tsx), supaya Pemberi
- * Kerja bisa melihat isi sertifikat kerja (SKP, SKD, dst) yang sudah
- * diisi pemohon sebelum menyetujui SIKA. SENGAJA generik terhadap `nama`
- * sertifikat: selama halaman pengisiannya menyimpan data dengan pola yang
- * sama (checklist + verifikasi, opsional gas monitoring), komponen ini
- * otomatis merender sertifikat apa pun yang dicentang di sika.sertifikat.
- * ======================================================================= */
-
 function YesNoCell({ active, type }: { active: boolean; type: 'yes' | 'no' }) {
   if (!active) return <span className="w-6 h-6 rounded-full border-2 border-gray-200 mx-auto block" />;
   return (
@@ -248,7 +234,7 @@ function ChecklistResultTable({
                 <td className="px-4 py-2 text-center">
                   {doc ? (
                     <span
-                      className="inline-flex items-center gap-1 bg-blue-50 border border-blue-200 rounded px-2 py-1 text-[11px] text-gray-700 max-w-[150px] truncate"
+                      className="inline-flex items-center gap-1 bg-blue-50 border border-blue-200 rounded px-2 py-1 text-[11px] text-gray-700 max-w-37.5 truncate"
                       title={doc.name}
                     >
                       <FileText size={11} className="text-blue-500 shrink-0" />
@@ -300,7 +286,7 @@ function GasMonitoringResultTable({ rows, diukurOleh }: { rows?: any[]; diukurOl
         <span className="text-xs text-gray-600">Diukur oleh: <span className="font-medium">{diukurOleh || '-'}</span></span>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-[11px] border-collapse min-w-[700px]">
+        <table className="w-full text-[11px] border-collapse min-w-175">
           <thead>
             <tr className="bg-blue-100">
               <th className="border border-blue-200 px-2 py-1.5">No</th>
@@ -348,8 +334,6 @@ function CertSectionHeader({
   );
 }
 
-// Safety notes — setiap sertifikat kerja punya daftar catatan keselamatan
-// sendiri, persis seperti di masing-masing halaman pengisian sertifikat.
 const CERT_SAFETY_NOTES: Record<string, string[]> = {
   'Sertifikat Kerja Panas (SKP)': [
     'Bahaya dalam melaksanakan pekerjaan sekaligus sebagai penyebab dasar kecelakaan adalah karena 3 faktor utama yaitu TIDAK TAHU, TIDAK MAMPU dan/atau TIDAK MAU.',
@@ -440,10 +424,6 @@ const CERT_SAFETY_NOTES: Record<string, string[]> = {
   ],
 };
 
-// Hero header sertifikat — meniru persis header halaman pengisian
-// masing-masing sertifikat (Rujukan SIKA No. | banner judul warna | logo
-// | status bar checklist). Warna & kode form mengikuti warna hero di
-// halaman pengisian; fallback ke biru tua kalau belum terdaftar.
 const CERT_HERO_STYLE: Record<string, { color: string; formCode?: string }> = {
   'Sertifikat Kerja Panas (SKP)': { color: '#ff0000', formCode: 'F-011/B-003/PG0300/2026-S9' },
   'Sertifikat Kerja Dingin (SKD)': { color: '#0070c0', formCode: 'F-012/B-003/PG0300/2026-S9' },
@@ -481,7 +461,7 @@ function SertifikatHero({
       <div className="flex border-t border-gray-200">
         <div className="flex items-center gap-3 px-5 py-3 border-r border-gray-200 shrink-0 bg-white">
           <span className="text-xs font-semibold text-gray-700 whitespace-nowrap">Rujukan SIKA No.</span>
-          <span className="border border-gray-300 rounded px-3 py-1.5 text-xs text-gray-700 bg-gray-50 min-w-[120px] text-center truncate">
+          <span className="border border-gray-300 rounded px-3 py-1.5 text-xs text-gray-700 bg-gray-50 min-w-30 text-center truncate">
             {data?.rujukanSikaNo || '-'}
           </span>
         </div>
@@ -669,12 +649,6 @@ function SertifikatDetailCard({
   );
 }
 
-/* =========================================================================
- * PROSES APPROVAL — gaya "dashboard" (kartu rounded-xl pastel, pill badge)
- * seperti versi lama. Perubahan Data (Revalidasi) mengikuti bahasa visual
- * yang sama supaya konsisten dengan kartu SIKA & JSA di sampingnya.
- * ======================================================================= */
-
 const statusIcon = (status: string) => {
   if (status === 'approved' || status === 'disetujui') return <CheckCircle size={16} className="text-green-500" />;
   if (status === 'rejected') return <XCircle size={16} className="text-red-500" />;
@@ -689,12 +663,8 @@ const statusLabel: Record<string, string> = {
   rejected: 'Ditolak',
   menunggu: 'Menunggu Review',
   disetujui: 'Disetujui',
-  // Bukan "Ditolak" — perubahan dikembalikan ke pemohon untuk dilengkapi
-  // lagi, bukan ditutup permanen. Lihat programStore.ts: PerubahanStatus.
   revisi: 'Perlu Revisi',
 };
-
-/* ========================================================================= */
 
 type ModalType =
   | 'approve-sika' | 'reject-sika'
@@ -716,10 +686,6 @@ export default function PemberiReviewPage() {
     sertifikatData,
   } = useProgramStore();
 
-  // Cari submission berdasarkan id dari URL — bukan lagi hardcoded 'store-1'.
-  // Setiap pengajuan yang sudah di-"Request Review" pemohon punya id sendiri
-  // di submissions[] (lihat programStore.ts), jadi halaman ini sekarang bisa
-  // dipakai untuk mereview pengajuan MANAPUN, bukan cuma satu.
   const record = submissions.find((s) => s.id === id);
 
   useEffect(() => {
@@ -732,6 +698,8 @@ export default function PemberiReviewPage() {
   const [alasan, setAlasan] = useState('');
   const [alasanError, setAlasanError] = useState('');
   const [showHistory, setShowHistory] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const sikaDocRef = useRef<HTMLDivElement>(null);
 
   if (!record) return null;
 
@@ -773,8 +741,6 @@ export default function PemberiReviewPage() {
     setModalType(null);
   };
 
-  // Riwayat khusus submission INI saja (dulu tidak difilter per-id sama
-  // sekali — begitu ada 2+ pengajuan, riwayatnya akan tercampur).
   const relevantHistory = approvalHistory
     .filter((h) => h.submissionId === id && (h.peran === 'pemberi' || h.peran === 'pemohon'))
     .slice()
@@ -793,37 +759,76 @@ export default function PemberiReviewPage() {
 
   const hasLangkahKerja = jsa?.sections?.some((sec) => sec.rows.some((r) => r.langkah.trim() !== ''));
 
+  const handleCopyJSA = async () => {
+    if (!sikaDocRef.current) return;
+
+    setIsExporting(true);
+    try {
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+
+      const dataUrl = await toPng(sikaDocRef.current, {
+        cacheBust: true,
+        pixelRatio: 2,
+        backgroundColor: '#ffffff',
+      });
+
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise<void>((res) => { img.onload = () => res(); });
+
+      const imgHeight = (img.height * pdfWidth) / img.width;
+
+      if (imgHeight > pageHeight) {
+        let yOffset = 0;
+        let firstSlice = true;
+        while (yOffset < imgHeight) {
+          if (!firstSlice) pdf.addPage();
+          pdf.addImage(dataUrl, 'PNG', 0, -yOffset, pdfWidth, imgHeight);
+          yOffset += pageHeight;
+          firstSlice = false;
+        }
+      } else {
+        pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, imgHeight);
+      }
+
+      pdf.save(`JSA_${jsa?.jsaNo || noSikaGabungan || 'export'}.pdf`);
+    } catch (err) {
+      console.error('Export error:', err);
+      alert('Gagal mengexport PDF. Silakan coba lagi.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-100">
 
-      {/* ================= HEADER — tanpa tombol Riwayat & Kembali ================= */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
-          <img src="/logosika.svg" alt="SIKA" className="h-7 object-contain" />
-          <div className="w-px h-10 bg-gray-200" />
-          <div className="flex flex-col leading-tight">
-            <span className="text-sm font-bold text-gray-800">Detail Review</span>
+          <div className="flex flex-col leading-tight border-l-4 border-blue-600 pl-3">
+            <span className="text-sm font-bold text-gray-800 tracking-tight">Detail Review</span>
             <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">
               Pemberi Kerja — Approval SIKA &amp; JSA
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-3 pr-6">
+        <div className="flex items-center gap-4" style={{ paddingRight: '38px' }}>
           <img
             src="/logopertaminagasfull.svg"
             alt="Pertamina Gas"
-            className="h-8 object-contain"
+            className="h-9 object-contain"
           />
         </div>
       </div>
 
-      {/* ================= DOKUMEN — bentuk sama seperti Detail Program Pemohon ================= */}
       <div className="px-4 sm:px-8 lg:px-14 xl:px-20 py-8">
         <div
+          ref={sikaDocRef}
           className="mx-auto w-full bg-white border-2 border-gray-900 text-[13px] text-gray-800 shadow-[0_4px_28px_rgba(15,23,42,0.10)]"
           style={{ maxWidth: '1680px' }}
         >
-          {/* ---- Judul dokumen: Nomor SIKA | Judul | Logo ---- */}
           <div className="grid grid-cols-[300px_1fr_260px] border-b-2 border-gray-900">
             <div className="border-r-2 border-gray-900 p-4">
               <span className="font-bold text-[13px]">Nomor SIKA :</span>
@@ -852,7 +857,6 @@ export default function PemberiReviewPage() {
             </div>
           </div>
 
-          {/* ---- Bagian 1: tanggal terbit / jam kerja / berlaku hingga ---- */}
           <div className="flex items-center gap-8 flex-wrap border-b-2 border-gray-900 px-4 py-3 bg-gray-50">
             <span className="font-bold text-[12px]">BAGIAN 1 - TANGGAL TERBIT</span>
             <DateBoxes digits={sika?.tanggalTerbit} />
@@ -864,12 +868,9 @@ export default function PemberiReviewPage() {
             <DateBoxes digits={sika?.berlakuHingga} />
           </div>
 
-          {/* ---- Body utama: kolom kiri (rail berwarna) + kolom kanan (formulir) ---- */}
           <div className="grid grid-cols-[1fr_320px]">
-            {/* ===================== KOLOM KIRI ===================== */}
             <div className="border-r-2 border-gray-900">
 
-              {/* --- Rail: PROGRAM --- */}
               <div className="flex">
                 <SectionRail color="#334155" text="PROGRAM" />
                 <div className="flex-1">
@@ -905,7 +906,6 @@ export default function PemberiReviewPage() {
                 </div>
               </div>
 
-              {/* --- Rail: PERMINTAAN (Bagian 2 - Jenis Pekerjaan) --- */}
               <div className="flex border-t-2 border-gray-900">
                 <SectionRail color="#2563eb" text="PERMINTAAN" />
                 <div className="flex-1">
@@ -932,7 +932,6 @@ export default function PemberiReviewPage() {
                 </div>
               </div>
 
-              {/* --- Rail: PERSIAPAN (Bagian 3 - Pemeriksaan) --- */}
               <div className="flex border-t-2 border-gray-900">
                 <SectionRail color="#ca8a04" text="PERSIAPAN" />
                 <div className="flex-1">
@@ -976,7 +975,6 @@ export default function PemberiReviewPage() {
                 </div>
               </div>
 
-              {/* --- Rail: PELAKSANAAN (Bagian 4 - JSA) --- */}
               <div className="flex border-t-2 border-gray-900">
                 <SectionRail color="#16a34a" text="PELAKSANAAN" />
                 <div className="flex-1">
@@ -1054,7 +1052,6 @@ export default function PemberiReviewPage() {
               </div>
             </div>
 
-            {/* ===================== KOLOM KANAN: FORMULIR SIKA ===================== */}
             <div className="bg-sky-50 flex flex-col">
               <div className="bg-sky-500 text-white text-center font-bold text-sm py-2 tracking-wide">
                 FORMULIR SIKA
@@ -1087,7 +1084,6 @@ export default function PemberiReviewPage() {
             </div>
           </div>
 
-          {/* ===================== DETAIL SERTIFIKAT KERJA ===================== */}
           {!!sika?.sertifikat?.length && (
             <div>
               <div className="bg-gray-900 px-4 py-2.5">
@@ -1103,7 +1099,6 @@ export default function PemberiReviewPage() {
         </div>
       </div>
 
-      {/* ================= PROSES APPROVAL — fungsi khusus Pemberi Kerja ================= */}
       <div className="px-4 sm:px-8 lg:px-14 xl:px-20 pb-8">
         <div
           className="mx-auto w-full bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden"
@@ -1133,34 +1128,28 @@ export default function PemberiReviewPage() {
               'border-blue-200 bg-blue-50'
             }`}>
               <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <FileText size={16} className="text-blue-600" />
-                  <span className="text-sm font-bold text-gray-800">SIKA</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {statusIcon(sikaStatusPemberi)}
-                  <span className={`text-xs font-semibold ${
-                    sikaApproved ? 'text-green-600' : sikaRejected ? 'text-red-600' : 'text-yellow-600'
-                  }`}>
-                    {statusLabel[sikaStatusPemberi] ?? 'Belum Direview'}
-                  </span>
-                </div>
+                <span className="text-sm font-bold text-gray-800 tracking-wide">DOKUMEN SIKA</span>
+                <span className={`text-xs font-bold uppercase tracking-wide ${
+                  sikaApproved ? 'text-green-700' : sikaRejected ? 'text-red-700' : 'text-amber-700'
+                }`}>
+                  {statusLabel[sikaStatusPemberi] ?? 'Belum Direview'}
+                </span>
               </div>
 
               {sikaApproved && (
-                <div className="flex items-center gap-2 bg-green-100 border border-green-200 rounded-lg px-3 py-2 mb-4">
-                  <CheckCircle size={13} className="text-green-500 shrink-0" />
+                <div className="bg-green-100 border border-green-200 rounded-lg px-3 py-2.5 mb-4">
+                  <p className="text-xs font-bold text-green-800 mb-0.5">Disetujui</p>
                   <p className="text-xs text-green-700">
-                    SIKA telah disetujui dan diteruskan ke Penanggung Jawab Aset. Keputusan ini bersifat final dan tidak dapat diubah dari halaman ini.
+                    Diteruskan ke Penanggung Jawab Aset. Keputusan ini bersifat final dan tidak dapat diubah dari halaman ini.
                   </p>
                 </div>
               )}
 
               {sikaRejected && alasanTolakSikaPemberi && (
-                <div className="mb-4 bg-red-100 border border-red-200 rounded-lg px-3 py-2">
-                  <p className="text-xs text-red-600 font-medium mb-0.5">Alasan Penolakan:</p>
+                <div className="mb-4 bg-red-100 border border-red-200 rounded-lg px-3 py-2.5">
+                  <p className="text-xs font-bold text-red-800 mb-0.5">Ditolak — Alasan Penolakan</p>
                   <p className="text-xs text-red-700">{alasanTolakSikaPemberi}</p>
-                  <p className="text-[10px] text-red-500 mt-1.5">
+                  <p className="text-[10px] text-red-500 mt-1.5 font-medium">
                     Menunggu pemohon mengajukan ulang setelah revisi.
                   </p>
                 </div>
@@ -1170,19 +1159,19 @@ export default function PemberiReviewPage() {
                 <p className="text-xs text-gray-500 mb-4">Periksa dokumen SIKA di atas sebelum memberikan keputusan.</p>
               )}
 
-              {!sikaApproved && (
+              {!sikaApproved && !sikaRejected && (
                 <div className="flex gap-2">
                   <button
                     onClick={() => openModal('approve-sika')}
-                    className="flex-1 flex items-center justify-center gap-1.5 bg-green-500 hover:bg-green-600 text-white text-xs font-semibold py-2 rounded-lg transition"
+                    className="flex-1 bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-2 rounded-lg transition"
                   >
-                    <CheckCircle size={13} /> Setujui SIKA
+                    SETUJUI SIKA
                   </button>
                   <button
                     onClick={() => openModal('reject-sika')}
-                    className="flex-1 flex items-center justify-center gap-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold py-2 rounded-lg transition"
+                    className="flex-1 bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-2 rounded-lg transition"
                   >
-                    <XCircle size={13} /> Tolak SIKA
+                    TOLAK SIKA
                   </button>
                 </div>
               )}
@@ -1196,47 +1185,43 @@ export default function PemberiReviewPage() {
             }`}>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
-                  <FileText size={16} className={jsaLocked ? 'text-gray-400' : 'text-blue-600'} />
-                  <span className="text-sm font-bold text-gray-800">JSA</span>
+                  <span className="text-sm font-bold text-gray-800 tracking-wide">DOKUMEN JSA</span>
                   {jsaLocked && (
-                    <span className="text-[10px] bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full font-medium">
-                      Terkunci
+                    <span className="text-[10px] bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full font-bold">
+                      TERKUNCI
                     </span>
                   )}
                 </div>
                 {!jsaLocked && (
-                  <div className="flex items-center gap-1.5">
-                    {statusIcon(jsaStatusPemberi)}
-                    <span className={`text-xs font-semibold ${
-                      jsaApproved ? 'text-green-600' : jsaRejected ? 'text-red-600' : 'text-yellow-600'
-                    }`}>
-                      {statusLabel[jsaStatusPemberi] ?? 'Belum Direview'}
-                    </span>
-                  </div>
+                  <span className={`text-xs font-bold uppercase tracking-wide ${
+                    jsaApproved ? 'text-green-700' : jsaRejected ? 'text-red-700' : 'text-amber-700'
+                  }`}>
+                    {statusLabel[jsaStatusPemberi] ?? 'Belum Direview'}
+                  </span>
                 )}
               </div>
 
               {jsaLocked && (
-                <div className="flex items-center gap-2 bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 mb-4">
-                  <Clock size={13} className="text-gray-400 shrink-0" />
+                <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2.5 mb-4">
+                  <p className="text-xs font-bold text-gray-600 mb-0.5">Menunggu SIKA</p>
                   <p className="text-xs text-gray-500">JSA baru dapat diproses setelah SIKA disetujui.</p>
                 </div>
               )}
 
               {jsaApproved && (
-                <div className="flex items-center gap-2 bg-green-100 border border-green-200 rounded-lg px-3 py-2 mb-4">
-                  <CheckCircle size={13} className="text-green-500 shrink-0" />
+                <div className="bg-green-100 border border-green-200 rounded-lg px-3 py-2.5 mb-4">
+                  <p className="text-xs font-bold text-green-800 mb-0.5">Disetujui</p>
                   <p className="text-xs text-green-700">
-                    JSA telah disetujui dan diteruskan ke Penanggung Jawab Aset. Keputusan ini bersifat final.
+                    Diteruskan ke Penanggung Jawab Aset. Keputusan ini bersifat final.
                   </p>
                 </div>
               )}
 
               {jsaRejected && alasanTolakJsaPemberi && (
-                <div className="mb-4 bg-red-100 border border-red-200 rounded-lg px-3 py-2">
-                  <p className="text-xs text-red-600 font-medium mb-0.5">Alasan Penolakan:</p>
+                <div className="mb-4 bg-red-100 border border-red-200 rounded-lg px-3 py-2.5">
+                  <p className="text-xs font-bold text-red-800 mb-0.5">Ditolak — Alasan Penolakan</p>
                   <p className="text-xs text-red-700">{alasanTolakJsaPemberi}</p>
-                  <p className="text-[10px] text-red-500 mt-1.5">
+                  <p className="text-[10px] text-red-500 mt-1.5 font-medium">
                     Menunggu pemohon mengajukan ulang setelah revisi.
                   </p>
                 </div>
@@ -1246,26 +1231,25 @@ export default function PemberiReviewPage() {
                 <p className="text-xs text-gray-500 mb-4">Periksa dokumen JSA di atas sebelum memberikan keputusan.</p>
               )}
 
-              {!jsaLocked && !jsaApproved && (
+              {!jsaLocked && !jsaApproved && !jsaRejected && (
                 <div className="flex gap-2">
                   <button
                     onClick={() => openModal('approve-jsa')}
-                    className="flex-1 flex items-center justify-center gap-1.5 bg-green-500 hover:bg-green-600 text-white text-xs font-semibold py-2 rounded-lg transition"
+                    className="flex-1 bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-2 rounded-lg transition"
                   >
-                    <CheckCircle size={13} /> Setujui JSA
+                    SETUJUI JSA
                   </button>
                   <button
                     onClick={() => openModal('reject-jsa')}
-                    className="flex-1 flex items-center justify-center gap-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold py-2 rounded-lg transition"
+                    className="flex-1 bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-2 rounded-lg transition"
                   >
-                    <XCircle size={13} /> Tolak JSA
+                    TOLAK JSA
                   </button>
                 </div>
               )}
             </div>
           </div>
 
-          {/* ---- Persetujuan Perubahan Data (Revalidasi) — hanya tampil kalau ada pengajuan ---- */}
           {perubahanStatus !== 'none' && (
             <div className="px-6 pb-6">
               <div className={`rounded-xl border-2 p-5 ${
@@ -1336,6 +1320,25 @@ export default function PemberiReviewPage() {
             </div>
           )}
         </div>
+      </div>
+
+      <div className="flex justify-end gap-2 pb-6 px-4 sm:px-8 lg:px-14 xl:px-20 bg-gray-100">
+        <button
+          onClick={handleCopyJSA}
+          disabled={isExporting}
+          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-blue-200"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+          {isExporting ? 'Mengexport...' : 'Copy JSA'}
+        </button>
+        <button
+          onClick={() => router.push('/dashboard/pemberi/approval-management')}
+          className="flex items-center gap-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-red-200"
+        >
+          <ChevronLeft size={14} /> Back
+        </button>
       </div>
 
       {modalType && (

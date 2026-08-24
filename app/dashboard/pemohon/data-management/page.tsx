@@ -947,6 +947,14 @@ export default function PemohonMonitoringPage() {
     router.push('/dashboard/pemohon/program/new');
   };
 
+  // Sama seperti handleAjukanUlangPerubahan — dipisah namanya supaya jelas
+  // konteksnya beda: ini untuk SIKA/JSA yang DITOLAK Pemberi Kerja (bukan
+  // untuk pengajuan Perubahan Data/Revalidasi yang diminta revisi).
+  const handleAjukanUlangSika = (rowId: string) => {
+    openSubmission(rowId);
+    router.push('/dashboard/pemohon/program/new');
+  };
+
   const handleExportExcel = () => {
     const exportRows = filtered.map((row, i) => {
       const status = DISPLAY_STATUS_CONFIG[getDisplayStatus(row)].label;
@@ -1537,9 +1545,19 @@ export default function PemohonMonitoringPage() {
                           <div className="space-y-1">
                             <StatusBadge status={displayStatus} />
                             {hasTolak && (
-                              <div className="text-[10px] text-red-500 leading-tight max-w-28">
-                                {row.alasanTolakSika || row.alasanTolakJsa}
-                              </div>
+                              <>
+                                <div className="text-[10px] text-red-500 leading-tight max-w-28">
+                                  {row.alasanTolakSika || row.alasanTolakJsa}
+                                </div>
+                                {baseStatus === 'ditolak' && (
+                                  <button
+                                    onClick={() => handleAjukanUlangSika(row.id)}
+                                    className="inline-flex items-center gap-1 text-[10px] font-semibold text-white rounded-lg px-2.5 py-1 transition shadow-sm w-fit bg-blue-600 hover:bg-blue-700"
+                                  >
+                                    <RefreshCcw size={10} /> Ajukan Ulang
+                                  </button>
+                                )}
+                              </>
                             )}
                             {row.perubahanStatus === 'menunggu' && (
                               <div className="text-[10px] leading-tight max-w-28" style={{ color: '#E31E24' }}>

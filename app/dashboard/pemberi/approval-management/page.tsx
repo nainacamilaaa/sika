@@ -53,13 +53,19 @@ function StatusPill({ status }: { status: ApprovalStatus }) {
 function StatusPJABadge({ status }: { status: ApprovalStatus }) {
   if (status === 'approved') {
     return (
-      <span className="inline-flex items-center h-5 leading-none text-[10px] font-medium px-2 rounded-full whitespace-nowrap text-white shadow-sm bg-green-600">
+      <span
+        className="inline-flex items-center h-5 leading-none text-[10px] font-medium px-2 rounded-full whitespace-nowrap text-white shadow-sm"
+        style={{ background: '#00954E' }}
+      >
         Disetujui
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center h-5 leading-none text-[10px] font-medium px-2 rounded-full whitespace-nowrap text-white shadow-sm bg-yellow-500">
+    <span
+      className="inline-flex items-center h-5 leading-none text-[10px] font-medium px-2 rounded-full whitespace-nowrap text-white shadow-sm"
+      style={{ background: '#F2A900' }}
+    >
       Menunggu
     </span>
   );

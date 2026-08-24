@@ -1,16 +1,13 @@
 'use client';
 
-import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { CheckCircle, XCircle, Clock, FileText, History, Check, ArrowLeft } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, FileText, History, Check, ArrowLeft, ChevronLeft } from 'lucide-react';
 import { useProgramStore, getNomorSika } from '@/store/programStore';
 import type { ApprovalStatus, SertifikatData, SikaData } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
-
-/* =========================================================================
- * Printed-form building blocks — sama persis dengan yang dipakai di halaman
- * Detail Program milik Pemohon dan Pemberi Review.
- * ======================================================================= */
+import jsPDF from 'jspdf';
+import { toPng } from 'html-to-image';
 
 function FormField({
   label,
@@ -183,10 +180,6 @@ const getRiskBadgeStyle = (value: string) => {
   if (v.includes('rendah') || v.includes('low')) return { bg: '#f0fdf4', text: '#15803d' };
   return { bg: '#f1f5f9', text: '#64748b' };
 };
-
-/* =========================================================================
- * Detail Sertifikat Kerja
- * ======================================================================= */
 
 function YesNoCell({ active, type }: { active: boolean; type: 'yes' | 'no' }) {
   if (!active) return <span className="w-6 h-6 rounded-full border-2 border-gray-200 mx-auto block" />;
@@ -656,10 +649,6 @@ function SertifikatDetailCard({
   );
 }
 
-/* =========================================================================
- * STATUS BADGE untuk PJA — hanya display
- * ======================================================================= */
-
 const STATUS_LABEL: Record<ApprovalStatus, { label: string; bg: string; text: string }> = {
   draft:    { label: 'Draft',     bg: '#8A94A6', text: 'white' },
   request:  { label: 'Request',   bg: '#0E76BC', text: 'white' },
@@ -680,21 +669,11 @@ function StatusBadgePJA({ status }: { status: ApprovalStatus }) {
   );
 }
 
-/* =========================================================================
- * MAIN PAGE — PJA REVIEW (VIEW ONLY, TIDAK ADA APPROVAL)
- * ======================================================================= */
-
 export default function PJAReviewPage() {
   const router = useRouter();
   const params = useParams();
   const id = params?.id as string;
 
-  // FIX: `approvalHistory` sebelumnya diambil dari `record.approvalHistory`,
-  // padahal properti itu tidak pernah ada di SubmissionRecord — approvalHistory
-  // adalah array TERPISAH di level store (lihat interface ProgramStore di
-  // programStore.ts). record.approvalHistory selalu undefined secara tipe,
-  // itu sebabnya muncul error merah. Sekarang diambil langsung dari store lalu
-  // difilter berdasarkan submissionId.
   const { submissions, sertifikatData, approvalHistory } = useProgramStore();
 
   const record = submissions.find((s) => s.id === id);
@@ -706,6 +685,8 @@ export default function PJAReviewPage() {
   }, [record, router]);
 
   const [showHistory, setShowHistory] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const sikaDocRef = useRef<HTMLDivElement>(null);
 
   if (!record) return null;
 
@@ -714,8 +695,6 @@ export default function PJAReviewPage() {
   const noSikaGabungan = getNomorSika(sika);
   const hasLangkahKerja = jsa?.sections?.some((sec) => sec.rows.some((r) => r.langkah.trim() !== ''));
 
-  // Riwayat khusus submission INI — diambil dari approvalHistory milik store,
-  // bukan dari record (lihat catatan FIX di atas).
   const relevantHistory = approvalHistory
     .filter((h) => h.submissionId === id)
     .slice()
@@ -732,10 +711,52 @@ export default function PJAReviewPage() {
     }
   };
 
+  const handleCopyJSA = async () => {
+    if (!sikaDocRef.current) return;
+
+    setIsExporting(true);
+    try {
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+
+      const dataUrl = await toPng(sikaDocRef.current, {
+        cacheBust: true,
+        pixelRatio: 2,
+        backgroundColor: '#ffffff',
+      });
+
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise<void>((res) => { img.onload = () => res(); });
+
+      const imgHeight = (img.height * pdfWidth) / img.width;
+
+      if (imgHeight > pageHeight) {
+        let yOffset = 0;
+        let firstSlice = true;
+        while (yOffset < imgHeight) {
+          if (!firstSlice) pdf.addPage();
+          pdf.addImage(dataUrl, 'PNG', 0, -yOffset, pdfWidth, imgHeight);
+          yOffset += pageHeight;
+          firstSlice = false;
+        }
+      } else {
+        pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, imgHeight);
+      }
+
+      pdf.save(`JSA_${jsa?.jsaNo || noSikaGabungan || 'export'}.pdf`);
+    } catch (err) {
+      console.error('Export error:', err);
+      alert('Gagal mengexport PDF. Silakan coba lagi.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-100">
 
-      {/* ================= HEADER ================= */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3" style={{ paddingLeft: '35px' }}>
           <div className="flex flex-col leading-tight border-l-4 border-blue-600 pl-3">
@@ -754,7 +775,6 @@ export default function PJAReviewPage() {
         </div>
       </div>
 
-      {/* ================= BUTTON BACK ================= */}
       <div className="px-4 sm:px-8 lg:px-14 xl:px-20 pt-4">
         <button
           onClick={() => router.push('/dashboard/pja/approval-management')}
@@ -765,13 +785,12 @@ export default function PJAReviewPage() {
         </button>
       </div>
 
-      {/* ================= DOKUMEN ================= */}
       <div className="px-4 sm:px-8 lg:px-14 xl:px-20 py-4">
         <div
+          ref={sikaDocRef}
           className="mx-auto w-full bg-white border-2 border-gray-900 text-[13px] text-gray-800 shadow-[0_4px_28px_rgba(15,23,42,0.10)]"
           style={{ maxWidth: '1680px' }}
         >
-          {/* ---- Judul dokumen ---- */}
           <div className="grid grid-cols-[300px_1fr_260px] border-b-2 border-gray-900">
             <div className="border-r-2 border-gray-900 p-4">
               <span className="font-bold text-[13px]">Nomor SIKA :</span>
@@ -800,7 +819,6 @@ export default function PJAReviewPage() {
             </div>
           </div>
 
-          {/* ---- Bagian 1 ---- */}
           <div className="flex items-center gap-8 flex-wrap border-b-2 border-gray-900 px-4 py-3 bg-gray-50">
             <span className="font-bold text-[12px]">BAGIAN 1 - TANGGAL TERBIT</span>
             <DateBoxes digits={sika?.tanggalTerbit} />
@@ -812,10 +830,8 @@ export default function PJAReviewPage() {
             <DateBoxes digits={sika?.berlakuHingga} />
           </div>
 
-          {/* ---- Body utama ---- */}
           <div className="grid grid-cols-[1fr_320px]">
             <div className="border-r-2 border-gray-900">
-              {/* Program */}
               <div className="flex">
                 <SectionRail color="#334155" text="PROGRAM" />
                 <div className="flex-1">
@@ -851,7 +867,6 @@ export default function PJAReviewPage() {
                 </div>
               </div>
 
-              {/* Jenis Pekerjaan */}
               <div className="flex border-t-2 border-gray-900">
                 <SectionRail color="#2563eb" text="PERMINTAAN" />
                 <div className="flex-1">
@@ -878,7 +893,6 @@ export default function PJAReviewPage() {
                 </div>
               </div>
 
-              {/* Pemeriksaan */}
               <div className="flex border-t-2 border-gray-900">
                 <SectionRail color="#ca8a04" text="PERSIAPAN" />
                 <div className="flex-1">
@@ -922,7 +936,6 @@ export default function PJAReviewPage() {
                 </div>
               </div>
 
-              {/* JSA */}
               <div className="flex border-t-2 border-gray-900">
                 <SectionRail color="#16a34a" text="PELAKSANAAN" />
                 <div className="flex-1">
@@ -1000,7 +1013,6 @@ export default function PJAReviewPage() {
               </div>
             </div>
 
-            {/* KOLOM KANAN: FORMULIR SIKA */}
             <div className="bg-sky-50 flex flex-col">
               <div className="bg-sky-500 text-white text-center font-bold text-sm py-2 tracking-wide">
                 FORMULIR SIKA
@@ -1031,7 +1043,6 @@ export default function PJAReviewPage() {
             </div>
           </div>
 
-          {/* DETAIL SERTIFIKAT KERJA */}
           {!!sika?.sertifikat?.length && (
             <div>
               <div className="bg-gray-900 px-4 py-2.5">
@@ -1047,7 +1058,6 @@ export default function PJAReviewPage() {
         </div>
       </div>
 
-      {/* ================= STATUS PJA (tanpa tombol approval) ================= */}
       <div className="px-4 sm:px-8 lg:px-14 xl:px-20 pb-8">
         <div
           className="mx-auto w-full bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden"
@@ -1073,26 +1083,22 @@ export default function PJAReviewPage() {
           </div>
 
           <div className="px-6 py-5 flex flex-wrap gap-6 items-center">
-            {/* Status SIKA */}
             <div className="flex items-center gap-3">
               <span className="text-xs font-medium text-gray-500">SIKA:</span>
               <StatusBadgePJA status={record.sikaStatusPJA} />
             </div>
 
-            {/* Status JSA */}
             <div className="flex items-center gap-3">
               <span className="text-xs font-medium text-gray-500">JSA:</span>
               <StatusBadgePJA status={record.jsaStatusPJA} />
             </div>
 
-            {/* Status Pemberi */}
             <div className="flex items-center gap-3">
               <span className="text-xs font-medium text-gray-500">Status Pemberi:</span>
               <StatusBadgePJA status={record.sikaStatusPemberi} />
               <StatusBadgePJA status={record.jsaStatusPemberi} />
             </div>
 
-            {/* Informasi tambahan */}
             <div className="border-l border-gray-200 pl-4 flex items-center gap-3">
               <span className="text-xs text-gray-400">
                 Diperbarui: {record.updatedAt ? new Date(record.updatedAt).toLocaleDateString('id-ID', {
@@ -1102,7 +1108,6 @@ export default function PJAReviewPage() {
             </div>
           </div>
 
-          {/* Catatan jika sudah selesai */}
           {record.sikaStatusPJA === 'approved' && record.jsaStatusPJA === 'approved' && (
             <div className="px-6 pb-4">
               <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-3">
@@ -1155,7 +1160,25 @@ export default function PJAReviewPage() {
         </div>
       </div>
 
-      {/* ================= HISTORY MODAL ================= */}
+      <div className="flex justify-end gap-2 pb-6 px-4 sm:px-8 lg:px-14 xl:px-20 bg-gray-100">
+        <button
+          onClick={handleCopyJSA}
+          disabled={isExporting}
+          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-blue-200"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+          {isExporting ? 'Mengexport...' : 'Copy JSA'}
+        </button>
+        <button
+          onClick={() => router.push('/dashboard/pja/approval-management')}
+          className="flex items-center gap-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-md shadow-red-200"
+        >
+          <ChevronLeft size={14} /> Back
+        </button>
+      </div>
+
       {showHistory && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[80vh] flex flex-col">

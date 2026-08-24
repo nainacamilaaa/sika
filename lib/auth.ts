@@ -4,7 +4,7 @@ export const DEMO_USERS: Array<User & { password: string }> = [
   {
     id: '1',
     name: 'Budi Santoso',
-    email: 'pelaksana@pgn.co.id',
+    email: 'pelaksana@pertagas.co.id',
     password: 'sika123',
     role: 'pemohon',
     jabatan: 'Pelaksana Kerja',
@@ -13,7 +13,7 @@ export const DEMO_USERS: Array<User & { password: string }> = [
   {
     id: '2',
     name: 'Rina Kusuma',
-    email: 'pemberi@pgn.co.id',
+    email: 'pemberi@pertagas.co.id',
     password: 'sika123',
     role: 'pemberi',
     jabatan: 'Pemberi Kerja',
@@ -22,7 +22,7 @@ export const DEMO_USERS: Array<User & { password: string }> = [
   {
     id: '3',
     name: 'Ahmad Fauzi',
-    email: 'pja@pgn.co.id',
+    email: 'pja@pertagas.co.id',
     password: 'sika123',
     role: 'pja',
     jabatan: 'Super Admin',
