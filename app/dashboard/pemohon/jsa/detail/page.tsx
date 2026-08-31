@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { Pencil, ChevronLeft, Check, FileText } from 'lucide-react';
-import { useProgramStore, getOverallStatus } from '@/store/programStore';
+import { useProgramStore } from '@/store/programStore';
 import type { SertifikatData, SikaData } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
 import jsPDF from 'jspdf';
@@ -672,7 +672,6 @@ export default function DetailProgramPage() {
     program, jsa, sika,
     setJsaStatus, submitToPemberi,
     sikaStatusPemberi, jsaStatusPemberi,
-    sikaStatusPJA, jsaStatusPJA,
     activeSubmissionId, catatRevalidasi,
     submissions, ajukanPerubahanRevalidasi,
     sertifikatData,
@@ -693,8 +692,16 @@ export default function DetailProgramPage() {
   const isDitolak = sikaStatusPemberi === 'rejected' || jsaStatusPemberi === 'rejected';
   const alreadySubmitted = (sikaStatusPemberi !== 'draft' || jsaStatusPemberi !== 'draft') && !isDitolak;
 
-  const overallStatus = getOverallStatus(sikaStatusPemberi, jsaStatusPemberi, sikaStatusPJA, jsaStatusPJA);
-  const isRevalidasiUpdate = overallStatus === 'aktif' || overallStatus === 'closed';
+  // Status keseluruhan sekarang murni ditentukan dari persetujuan Pemberi
+  // Kerja — tidak ada lagi tahap PJA yang harus menyetujui setelahnya.
+  const overallStatus: 'aktif' | 'pending' | 'ditolak' | 'draft' = isDitolak
+    ? 'ditolak'
+    : sikaStatusPemberi === 'approved' && jsaStatusPemberi === 'approved'
+      ? 'aktif'
+      : sikaStatusPemberi === 'request' || jsaStatusPemberi === 'request'
+        ? 'pending'
+        : 'draft';
+  const isRevalidasiUpdate = overallStatus === 'aktif';
 
   const activeSubmission = submissions.find((s) => s.id === activeSubmissionId);
   const perubahanMenunggu = activeSubmission?.perubahanStatus === 'menunggu';
@@ -1120,10 +1127,6 @@ export default function DetailProgramPage() {
         </div>
 
       </div>
-
-      {isDitolak && (sikaAlasan => {
-        return null;
-      })(null)}
 
       {isDitolak && (
         <div className="px-6 pb-3 bg-gray-100 flex justify-end">

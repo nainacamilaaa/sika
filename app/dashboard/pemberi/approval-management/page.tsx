@@ -6,13 +6,13 @@ import {
   ChevronLeft, ChevronRight, FileText, Search, Filter,
   CheckCircle, XCircle, Clock, AlertCircle, ClipboardCheck, Loader2,
   History, Calendar, CalendarDays, ChevronDown,
-  RefreshCcw, X, ArrowUpDown, PauseCircle,
+  RefreshCcw, X, ArrowUpDown, PauseCircle, Wind,
 } from 'lucide-react';
 import {
   useProgramStore, getNomorSika, getOverallStatus,
-  getRevalidasiOverride, MAX_HARI_REVALIDASI,
+  getRevalidasiOverride, MAX_HARI_REVALIDASI, toLocalDateKey,
 } from '@/store/programStore';
-import type { ApprovalStatus, PerubahanStatus } from '@/store/programStore';
+import type { ApprovalStatus, PerubahanStatus, GasMonitoringData } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
 import {
   ResponsiveContainer, Tooltip, Legend,
@@ -42,31 +42,6 @@ function StatusPill({ status }: { status: ApprovalStatus }) {
     >
       <Icon size={10} strokeWidth={3} className="shrink-0" />
       {cfg.label}
-    </span>
-  );
-}
-
-// ============================================================
-// BADGE UNTUK PREMOBILISASI & MOBILISASI (hanya 2 status)
-// ============================================================
-
-function StatusPJABadge({ status }: { status: ApprovalStatus }) {
-  if (status === 'approved') {
-    return (
-      <span
-        className="inline-flex items-center h-5 leading-none text-[10px] font-medium px-2 rounded-full whitespace-nowrap text-white shadow-sm"
-        style={{ background: '#00954E' }}
-      >
-        Disetujui
-      </span>
-    );
-  }
-  return (
-    <span
-      className="inline-flex items-center h-5 leading-none text-[10px] font-medium px-2 rounded-full whitespace-nowrap text-white shadow-sm"
-      style={{ background: '#F2A900' }}
-    >
-      Menunggu
     </span>
   );
 }
@@ -133,8 +108,6 @@ interface PemberiRow {
   sifatPekerjaan: string;
   sikaStatus: ApprovalStatus;
   jsaStatus: ApprovalStatus;
-  sikaStatusPJA: ApprovalStatus;
-  jsaStatusPJA: ApprovalStatus;
   riwayatRevalidasi: string[];
   revalidasiSuspendRequest: { tanggal: string; status: 'menunggu' | 'ditolak'; alasanTolak?: string | null } | null;
   createdAt?: string;
@@ -145,48 +118,284 @@ interface PemberiRow {
 }
 
 const getSuspendOverride = (row: PemberiRow): 'suspend' | 'closed' | null => {
-  const overall = getOverallStatus(row.sikaStatus, row.jsaStatus, row.sikaStatusPJA, row.jsaStatusPJA);
+  const overall = getOverallStatus(row.sikaStatus, row.jsaStatus);
   if (overall !== 'aktif') return null;
   return getRevalidasiOverride(row.createdAt || '', row.riwayatRevalidasi);
 };
 
+// ═══════════════════════════════════════════════════════════
+// Gas Monitoring — helper untuk mengumpulkan seluruh entri gas
+// monitoring milik satu pengajuan (key disimpan sebagai
+// `${rowId}_${tanggal}` di store), diurutkan terbaru dulu.
+// ═══════════════════════════════════════════════════════════
+function getGasEntriesForRow(
+  gasMonitoringData: Record<string, GasMonitoringData> | undefined,
+  rowId: string
+): GasMonitoringData[] {
+  if (!gasMonitoringData) return [];
+  const prefix = `${rowId}_`;
+  return Object.entries(gasMonitoringData)
+    .filter(([key]) => key.startsWith(prefix))
+    .map(([, value]) => value)
+    .sort((a, b) => (a.tanggal < b.tanggal ? 1 : -1));
+}
+
+function formatTanggalGas(tanggal: string): string {
+  const d = new Date(tanggal);
+  if (isNaN(d.getTime())) return tanggal;
+  return d.toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+}
+
+// ═══════════════════════════════════════════════════════════
+// RevalidasiCell — FIX: sebelumnya kolom ini HANYA membaca
+// row.perubahanStatus, sehingga pengajuan Pemulihan Suspend
+// (yang disimpan di row.revalidasiSuspendRequest, jalur terpisah
+// dari perubahanStatus) tidak pernah tampil ke Pemberi Kerja.
+// Sekarang kedua jalur ditampilkan berdampingan, masing-masing
+// dengan tombol Review sendiri.
+// ═══════════════════════════════════════════════════════════
 function RevalidasiCell({
   row,
   onReview,
+  onReviewSuspend,
 }: {
   row: PemberiRow;
   onReview: () => void;
+  onReviewSuspend: () => void;
 }) {
+  const suspendOverride = getSuspendOverride(row);
+  const suspendRequest = row.revalidasiSuspendRequest;
+
+  const suspendBlock =
+    suspendOverride === 'suspend' && suspendRequest ? (
+      <div className="flex flex-col gap-1 items-start">
+        <span
+          className="inline-flex items-center h-5 leading-none gap-1 text-[10px] font-medium px-2.5 py-1 rounded-full whitespace-nowrap text-white shadow-sm"
+          style={{ background: suspendRequest.status === 'menunggu' ? '#EA580C' : '#E31E24' }}
+        >
+          <PauseCircle size={10} strokeWidth={3} className="shrink-0" />
+          {suspendRequest.status === 'menunggu' ? 'Pemulihan Menunggu' : 'Pemulihan Ditolak'}
+        </span>
+        <button
+          onClick={onReviewSuspend}
+          className="inline-flex items-center gap-1 text-[10px] font-semibold text-white rounded-lg px-2.5 py-1 transition shadow-sm"
+          style={{ background: '#EA580C' }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = '#c2410c'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = '#EA580C'; }}
+        >
+          <ClipboardCheck size={11} /> Review Suspend
+        </button>
+      </div>
+    ) : null;
+
   if (row.perubahanStatus === 'none') {
-    return <span className="text-[10px] text-gray-300 italic">Belum ada</span>;
+    return suspendBlock ?? <span className="text-[10px] text-gray-300 italic">Belum ada</span>;
   }
+
   const cfg = REVALIDASI_BADGE[row.perubahanStatus]!;
   const Icon = cfg.icon;
+
   return (
-    <div className="flex flex-col gap-1 items-start">
-      <span
-        className="inline-flex items-center h-5 leading-none gap-1 text-[10px] font-medium px-2.5 py-1 rounded-full whitespace-nowrap text-white shadow-sm"
-        style={{ background: cfg.bg }}
+    <div className="flex flex-col gap-2">
+      {suspendBlock}
+      <div className="flex flex-col gap-1 items-start">
+        <span
+          className="inline-flex items-center h-5 leading-none gap-1 text-[10px] font-medium px-2.5 py-1 rounded-full whitespace-nowrap text-white shadow-sm"
+          style={{ background: cfg.bg }}
+        >
+          <Icon size={10} strokeWidth={3} className="shrink-0" />
+          {cfg.label}
+        </span>
+        {row.perubahanStatus === 'menunggu' && (
+          <button
+            onClick={onReview}
+            className="inline-flex items-center gap-1 text-[10px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg px-2.5 py-1 transition shadow-sm"
+          >
+            <ClipboardCheck size={11} /> Review
+          </button>
+        )}
+        {row.perubahanStatus !== 'menunggu' && (
+          <button
+            onClick={onReview}
+            className="text-[10px] font-medium text-blue-600 hover:underline"
+          >
+            Lihat detail
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// Gas Monitoring Cell — kolom baru di tabel pengajuan masuk,
+// menampilkan ringkasan (sudah/belum diisi hari ini + jumlah
+// catatan) dan tombol untuk membuka modal lihat data (read-only,
+// pemberi tidak bisa mengubah data yang diisi pemohon).
+// ═══════════════════════════════════════════════════════════
+function GasMonitoringPemberiCell({
+  entries,
+  onLihat,
+}: {
+  entries: GasMonitoringData[];
+  onLihat: () => void;
+}) {
+  if (entries.length === 0) {
+    return <span className="text-[10px] text-gray-300 italic">Belum ada data</span>;
+  }
+
+  const todayKey = toLocalDateKey(new Date());
+  const sudahHariIni = entries.some((e) => e.tanggal === todayKey);
+
+  return (
+    <div className="flex flex-col gap-1.5 items-start w-32">
+      {sudahHariIni ? (
+        <span className="inline-flex items-center gap-0.5 text-[8px] font-semibold" style={{ color: '#1e40af' }}>
+          <CheckCircle size={8} strokeWidth={3} /> Terisi hari ini
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-0.5 text-[8px] font-semibold" style={{ color: '#EA580C' }}>
+          <XCircle size={8} strokeWidth={3} /> Belum hari ini
+        </span>
+      )}
+      <span className="text-[9px] text-gray-400">{entries.length} catatan</span>
+      <button
+        onClick={onLihat}
+        className="inline-flex items-center justify-center gap-1 text-[10px] font-semibold rounded-lg px-2.5 py-1.5 transition shadow-sm w-fit bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
       >
-        <Icon size={10} strokeWidth={3} className="shrink-0" />
-        {cfg.label}
-      </span>
-      {row.perubahanStatus === 'menunggu' && (
-        <button
-          onClick={onReview}
-          className="inline-flex items-center gap-1 text-[10px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg px-2.5 py-1 transition shadow-sm"
+        <Wind size={11} /> Lihat Data
+      </button>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// Gas Monitoring View Modal — read-only, bisa berpindah antar
+// tanggal (tab) untuk melihat riwayat pemeriksaan gas yang
+// diisi pemohon. Samakan bahasa visual dengan modal lain.
+// ═══════════════════════════════════════════════════════════
+function GasMonitoringViewModal({
+  namaProgram,
+  noSIKA,
+  entries,
+  onClose,
+}: {
+  namaProgram: string;
+  noSIKA: string;
+  entries: GasMonitoringData[];
+  onClose: () => void;
+}) {
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const selected = entries[selectedIdx];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden max-h-[92vh] flex flex-col">
+
+        <div
+          className="px-6 py-4 flex items-center justify-between shrink-0"
+          style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}
         >
-          <ClipboardCheck size={11} /> Review
-        </button>
-      )}
-      {row.perubahanStatus !== 'menunggu' && (
-        <button
-          onClick={onReview}
-          className="text-[10px] font-medium text-blue-600 hover:underline"
-        >
-          Lihat detail
-        </button>
-      )}
+          <div className="leading-tight">
+            <p className="text-white font-bold text-sm">Gas Monitoring — {namaProgram}</p>
+            <p className="text-[10px] text-white/70 font-medium">{noSIKA}</p>
+          </div>
+          <Wind size={20} className="text-white/70" />
+        </div>
+
+        <div className="overflow-y-auto">
+          {entries.length === 0 ? (
+            <div className="px-6 py-10 text-center text-xs text-gray-300">Belum ada data gas monitoring.</div>
+          ) : (
+            <>
+              <div className="px-6 py-3 border-b border-gray-100 bg-gray-50/60 flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide shrink-0">
+                  Tanggal
+                </span>
+                {entries.map((e, idx) => (
+                  <button
+                    key={e.tanggal}
+                    onClick={() => setSelectedIdx(idx)}
+                    className={`text-[10px] font-semibold px-3 py-1.5 rounded-full transition ${
+                      idx === selectedIdx
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-white border border-gray-200 text-gray-500 hover:bg-gray-50'
+                    }`}
+                  >
+                    {new Date(e.tanggal).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}
+                  </button>
+                ))}
+              </div>
+
+              {selected && (
+                <div className="px-6 py-4 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <p className="text-xs text-gray-600">
+                      <span className="font-semibold text-gray-800">Diukur oleh:</span> {selected.diukurOleh}
+                    </p>
+                    <span className="text-[10px] text-gray-400">{formatTanggalGas(selected.tanggal)}</span>
+                  </div>
+
+                  <div className="border border-gray-100 rounded-xl overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs border-collapse min-w-[680px]">
+                        <thead>
+                          <tr className="bg-blue-50">
+                            <th rowSpan={2} className="border border-blue-100 px-2 py-2 text-blue-700 font-semibold w-9">No</th>
+                            <th rowSpan={2} className="border border-blue-100 px-2 py-2 text-blue-700 font-semibold w-20">Waktu</th>
+                            <th colSpan={5} className="border border-blue-100 px-2 py-2 text-blue-700 font-semibold">Gas</th>
+                            <th rowSpan={2} className="border border-blue-100 px-2 py-2 text-blue-700 font-semibold w-16">Temp °C</th>
+                            <th rowSpan={2} className="border border-blue-100 px-2 py-2 text-blue-700 font-semibold w-20">Sign</th>
+                            <th rowSpan={2} className="border border-blue-100 px-2 py-2 text-blue-700 font-semibold min-w-[120px]">Remark</th>
+                          </tr>
+                          <tr className="bg-blue-50">
+                            <th className="border border-blue-100 px-1 py-1.5 text-blue-600 font-medium w-16">LEL %</th>
+                            <th className="border border-blue-100 px-1 py-1.5 text-blue-600 font-medium w-16">O2 %</th>
+                            <th className="border border-blue-100 px-1 py-1.5 text-blue-600 font-medium w-20">H2S ppm</th>
+                            <th className="border border-blue-100 px-1 py-1.5 text-blue-600 font-medium w-20">CO2 ppm</th>
+                            <th className="border border-blue-100 px-1 py-1.5 text-blue-600 font-medium w-20">CO ppm</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selected.rows.map((r, index) => (
+                            <tr key={r.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                              <td className="border border-gray-100 px-2 py-1.5 text-center text-gray-400 font-mono">
+                                {String(index + 1).padStart(2, '0')}
+                              </td>
+                              <td className="border border-gray-100 px-2 py-1.5 text-center text-gray-700">{r.time || '-'}</td>
+                              <td className="border border-gray-100 px-2 py-1.5 text-center text-gray-700">{r.lel || '-'}</td>
+                              <td className="border border-gray-100 px-2 py-1.5 text-center text-gray-700">{r.o2 || '-'}</td>
+                              <td className="border border-gray-100 px-2 py-1.5 text-center text-gray-700">{r.h2s || '-'}</td>
+                              <td className="border border-gray-100 px-2 py-1.5 text-center text-gray-700">{r.co2 || '-'}</td>
+                              <td className="border border-gray-100 px-2 py-1.5 text-center text-gray-700">{r.co || '-'}</td>
+                              <td className="border border-gray-100 px-2 py-1.5 text-center text-gray-700">{r.temp || '-'}</td>
+                              <td className="border border-gray-100 px-2 py-1.5 text-center text-gray-700">{r.sign || '-'}</td>
+                              <td className="border border-gray-100 px-2 py-1.5 text-gray-700">{r.remark || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-gray-400 leading-relaxed">
+                    Data ini diisi oleh pemohon selama SIKA berstatus Aktif dan bersifat baca-saja di halaman ini.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="px-6 py-3.5 border-t border-gray-100 flex items-center justify-end bg-gray-50/60 shrink-0">
+          <button
+            onClick={onClose}
+            className="text-xs font-semibold text-gray-500 hover:text-gray-700 px-3.5 py-2 rounded-lg transition"
+          >
+            Tutup
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1089,6 +1298,7 @@ export default function PemberiApprovalManagementPage() {
   const router = useRouter();
   const {
     submissions,
+    gasMonitoringData,
     approvePerubahanRevalidasi,
     mintaRevisiPerubahan,
     approveRevalidasiSuspend,
@@ -1108,6 +1318,7 @@ export default function PemberiApprovalManagementPage() {
   const [revalidasiModalRowId, setRevalidasiModalRowId] = useState<string | null>(null);
   const [suspendModalRowId, setSuspendModalRowId] = useState<string | null>(null);
   const [riwayatModalRowId, setRiwayatModalRowId] = useState<string | null>(null);
+  const [gasViewModalRowId, setGasViewModalRowId] = useState<string | null>(null);
 
   const rows: PemberiRow[] = useMemo(() => {
     return submissions.map((sub): PemberiRow => {
@@ -1133,8 +1344,6 @@ export default function PemberiApprovalManagementPage() {
         sifatPekerjaan: sub.sika.sifatPekerjaan || '-',
         sikaStatus: sub.sikaStatusPemberi,
         jsaStatus: sub.jsaStatusPemberi,
-        sikaStatusPJA: sub.sikaStatusPJA,
-        jsaStatusPJA: sub.jsaStatusPJA,
         riwayatRevalidasi: sub.riwayatRevalidasi,
         revalidasiSuspendRequest: sub.revalidasiSuspendRequest,
         createdAt: sub.createdAt,
@@ -1207,6 +1416,8 @@ export default function PemberiApprovalManagementPage() {
   const revalidasiModalRow = revalidasiModalRowId ? rows.find((r) => r.id === revalidasiModalRowId) : undefined;
   const suspendModalRow = suspendModalRowId ? rows.find((r) => r.id === suspendModalRowId) : undefined;
   const riwayatModalRow = riwayatModalRowId ? rows.find((r) => r.id === riwayatModalRowId) : undefined;
+  const gasViewModalRow = gasViewModalRowId ? rows.find((r) => r.id === gasViewModalRowId) : undefined;
+  const gasViewModalEntries = gasViewModalRowId ? getGasEntriesForRow(gasMonitoringData, gasViewModalRowId) : [];
 
   const hasActiveFilter = !!(filterMasaBerlaku || filterLokasi || filterSifat || filterRevalidasi || filterTglDari || filterTglSampai);
 
@@ -1273,13 +1484,14 @@ export default function PemberiApprovalManagementPage() {
 
       <div className="px-6 py-8 flex flex-col gap-6">
 
-        <div className="grid gap-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '0.75rem' }}>
+        <div className="grid gap-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: '0.75rem' }}>
           {[
             { label: 'Total Pengajuan', value: rows.length, bg: '#1B2A4A', sub: 'Semua pengajuan masuk' },
             { label: 'Perlu Review', value: countByOverall('pending'), bg: '#0E76BC', sub: 'Menunggu keputusan' },
             { label: 'Disetujui', value: countByOverall('approved'), bg: '#00954E', sub: 'SIKA & JSA aktif' },
             { label: 'Ditolak', value: countByOverall('rejected'), bg: '#E31E24', sub: 'Perlu revisi pemohon' },
             { label: 'Revalidasi Masuk', value: countRevalidasiMenunggu, bg: '#F2A900', sub: 'Menunggu review harian' },
+            { label: 'Pemulihan Suspend', value: countSuspendMenunggu, bg: '#EA580C', sub: 'Menunggu approval' },
           ].map((s) => (
             <div
               key={s.label}
@@ -1478,7 +1690,7 @@ export default function PemberiApprovalManagementPage() {
                 <table className="w-full text-sm border-collapse">
                   <thead>
                     <tr style={{ background: '#f8fafc' }} className="border-b border-gray-200">
-                      {['No', 'Nama Program', 'Lokasi', 'Pelaksana', 'No JSA', 'No SIKA', 'Premobilisasi', 'Mobilisasi', 'Status SIKA', 'Status JSA', 'Status Keseluruhan', 'Revalidasi', 'Aksi'].map((h) => (
+                      {['No', 'Nama Program', 'Lokasi', 'Pelaksana', 'No JSA', 'No SIKA', 'Status SIKA', 'Status JSA', 'Status Keseluruhan', 'Revalidasi', 'Gas Monitoring', 'Aksi'].map((h) => (
                         <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 text-xs tracking-wide whitespace-nowrap">
                           {h}
                         </th>
@@ -1488,7 +1700,7 @@ export default function PemberiApprovalManagementPage() {
                   <tbody>
                     {sorted.length === 0 ? (
                       <tr>
-                        <td colSpan={13} className="text-center text-gray-400 py-14 text-sm">
+                        <td colSpan={12} className="text-center text-gray-400 py-14 text-sm">
                           Tidak ada data yang sesuai filter.
                         </td>
                       </tr>
@@ -1513,12 +1725,6 @@ export default function PemberiApprovalManagementPage() {
                               {row.tanggalBerakhirSIKA !== '-' ? `s/d ${row.tanggalBerakhirSIKA}` : '-'}
                             </div>
                           </td>
-                          <td className="px-4 py-3">
-                            <StatusPJABadge status={row.sikaStatusPJA} />
-                          </td>
-                          <td className="px-4 py-3">
-                            <StatusPJABadge status={row.jsaStatusPJA} />
-                          </td>
                           <td className="px-4 py-3"><StatusPill status={row.sikaStatus} /></td>
                           <td className="px-4 py-3"><StatusPill status={row.jsaStatus} /></td>
                           <td className="px-4 py-3"><StatusPill status={overall} /></td>
@@ -1526,6 +1732,13 @@ export default function PemberiApprovalManagementPage() {
                             <RevalidasiCell
                               row={row}
                               onReview={() => setRevalidasiModalRowId(row.id)}
+                              onReviewSuspend={() => setSuspendModalRowId(row.id)}
+                            />
+                          </td>
+                          <td className="px-4 py-3">
+                            <GasMonitoringPemberiCell
+                              entries={getGasEntriesForRow(gasMonitoringData, row.id)}
+                              onLihat={() => setGasViewModalRowId(row.id)}
                             />
                           </td>
                           <td className="px-4 py-3">
@@ -1591,6 +1804,15 @@ export default function PemberiApprovalManagementPage() {
         <RiwayatModal
           row={riwayatModalRow}
           onClose={() => setRiwayatModalRowId(null)}
+        />
+      )}
+
+      {gasViewModalRow && (
+        <GasMonitoringViewModal
+          namaProgram={gasViewModalRow.namaProgram}
+          noSIKA={gasViewModalRow.noSIKA}
+          entries={gasViewModalEntries}
+          onClose={() => setGasViewModalRowId(null)}
         />
       )}
     </div>

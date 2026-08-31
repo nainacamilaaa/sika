@@ -78,7 +78,15 @@ export default function SikaNewPage() {
   const [jamKerjaSelesai, setJamKerjaSelesai] = useState(sika?.jamKerjaSelesai || '');
   const [waktuIsolasi, setWaktuIsolasi] = useState(sika?.waktuIsolasi || '');
   const [noSikaAreaFungsi, setNoSikaAreaFungsi] = useState(sika?.noSikaAreaFungsi || '');
-  const [noSikaNomorUrut, setNoSikaNomorUrut] = useState(sika?.noSikaNomorUrut || '');
+
+  // NOMOR SIKA - bagian kedua dikunci ke tahun berjalan (mis. 2026, otomatis jadi 2027 saat tahun berganti)
+  const currentYear = new Date().getFullYear().toString();
+  const [noSikaNomorUrut, setNoSikaNomorUrut] = useState(sika?.noSikaNomorUrut || currentYear);
+
+  useEffect(() => {
+    setNoSikaNomorUrut(new Date().getFullYear().toString());
+  }, []);
+
   const [lanjutanDariSika, setLanjutanDariSika] = useState(sika?.lanjutanDariSika || '');
 
   const tanggalTerbitPickerRef = useRef<HTMLInputElement>(null);
@@ -454,12 +462,10 @@ export default function SikaNewPage() {
               <span className="text-gray-400 font-bold">-</span>
               <input
                 type="text"
-                inputMode="numeric"
-                maxLength={4}
                 value={noSikaNomorUrut}
-                onChange={(e) => setNoSikaNomorUrut(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
-                placeholder="0001"
-                className="w-16 border border-gray-300 rounded px-2 py-1.5 text-center text-gray-600 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                readOnly
+                title="Terkunci ke tahun berjalan"
+                className="w-16 border border-gray-300 rounded px-2 py-1.5 text-center text-gray-500 bg-gray-100 cursor-not-allowed focus:outline-none"
               />
             </div>
           </div>

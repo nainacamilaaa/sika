@@ -46,6 +46,41 @@ const getRiskStyle = (value: string): { bg: string; text: string } => {
   return { bg: '#f1f5f9', text: '#64748b' };
 };
 
+// ---- Matriks Risiko (Probability x Level) ----
+const RISK_ROWS = [
+  { level: 5, label: 'catastropic' },
+  { level: 4, label: 'significant' },
+  { level: 3, label: 'moderate' },
+  { level: 2, label: 'minor' },
+  { level: 1, label: 'insignificant' },
+];
+
+const RISK_COLS = [
+  { prob: 1, label: '<10⁻⁶ per year' },
+  { prob: 2, label: '10⁻⁶ to 10⁻⁴ per year' },
+  { prob: 3, label: '10⁻⁴ to 10⁻² per year' },
+  { prob: 4, label: '10⁻² to 1 per year' },
+  { prob: 5, label: '> 1 per year' },
+];
+
+// Kategori 3-tingkat (dipakai untuk nilai yang disimpan & badge di tabel JSA).
+const getRiskCategory = (score: number): 'Rendah' | 'Sedang' | 'Tinggi' => {
+  if (score <= 4) return 'Rendah';
+  if (score === 5 || score === 6 || score === 8 || score === 9) return 'Sedang';
+  return 'Tinggi'; // 10, 12, 15, 16, 20, 25
+};
+
+// Warna per-sel matriks (5 tingkat) supaya tampilannya sama seperti gambar acuan.
+const getMatrixCellColor = (score: number): { bg: string; text: string } => {
+  if (score <= 3) return { bg: '#16a34a', text: '#ffffff' };
+  if (score === 4) return { bg: '#86efac', text: '#14532d' };
+  if (score === 5 || score === 6 || score === 8 || score === 9) return { bg: '#fde047', text: '#713f12' };
+  if (score === 10 || score === 12) return { bg: '#fb923c', text: '#ffffff' };
+  return { bg: '#ef4444', text: '#ffffff' }; // 15, 16, 20, 25
+};
+
+const OTHERS_LABEL = 'Others :';
+
 const INITIAL_SECTIONS: JSASection[] = [
   { key: 'A', label: 'Persiapan Awal', rows: [makeRow('A1'), makeRow('A2')] },
   { key: 'B', label: 'Pelaksanaan Pekerjaan', rows: [makeRow('B1'), makeRow('B2')] },
@@ -75,7 +110,7 @@ const INITIAL_PPE: PPEItem[][] = [
     { label: 'Coveralls', checked: false },
     { label: 'Catridge / Filter Mask', checked: false },
     { label: 'Fire Extinguisher', checked: false },
-    { label: 'Others :', checked: false },
+    { label: OTHERS_LABEL, checked: false },
   ],
 ];
 
@@ -116,15 +151,71 @@ export default function DetailJSAPage() {
   const [ppe, setPpe] = useState<PPEItem[][]>(() => {
     if (!jsa?.checkedPPE?.length) return INITIAL_PPE;
     return INITIAL_PPE.map((row) =>
-      row.map((item) => ({ ...item, checked: jsa.checkedPPE.includes(item.label) }))
+      row.map((item) => ({
+        ...item,
+        checked: jsa?.checkedPPE?.includes(item.label) ?? false,
+      }))
     );
   });
 
+  // Isian bebas untuk "Others :" — disimpan sebagai tag/chip, bisa lebih
+  // dari satu, ditambahkan dengan menekan Enter (atau koma) di input kecil
+  // supaya tinggi baris tetap sama seperti baris PPE lainnya.
+  const [othersTags, setOthersTags] = useState<string[]>(jsa?.othersPPETexts ?? []);
+  const [othersInput, setOthersInput] = useState('');
+
+  // Kotak "Others :" otomatis tercentang kalau minimal satu tag ada
+  // (atau sedang mengetik sesuatu yang belum di-commit).
+  useEffect(() => {
+    const hasAny = othersTags.length > 0 || othersInput.trim() !== '';
+    setPpe((prev) =>
+      prev.map((row) =>
+        row.map((item) => (item.label === OTHERS_LABEL ? { ...item, checked: hasAny } : item))
+      )
+    );
+  }, [othersTags, othersInput]);
+
+  const commitOthersInput = () => {
+    const val = othersInput.trim();
+    if (!val) return;
+    setOthersTags((prev) => [...prev, val]);
+    setOthersInput('');
+  };
+
+  const removeOthersTag = (idx: number) => {
+    setOthersTags((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleOthersKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      commitOthersInput();
+    } else if (e.key === 'Backspace' && othersInput === '' && othersTags.length > 0) {
+      setOthersTags((prev) => prev.slice(0, -1));
+    }
+  };
+
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // Popup pemilihan tingkat risiko (matriks Probability x Level) — menyimpan
+  // baris JSA mana yang sedang diisi.
+  const [riskModal, setRiskModal] = useState<{ sectionKey: string; rowId: string } | null>(null);
+
+  const openRiskModal = (sectionKey: string, rowId: string) => setRiskModal({ sectionKey, rowId });
+  const closeRiskModal = () => setRiskModal(null);
+
+  const selectRiskScore = (score: number) => {
+    if (!riskModal) return;
+    const kategori = getRiskCategory(score);
+    updateRow(riskModal.sectionKey, riskModal.rowId, 'tingkatRisiko', `${kategori} (${score})`);
+    closeRiskModal();
+  };
+
   // Order the row fields are visited in when pressing Enter (like Tab).
+  // "tingkatRisiko" is excluded — it's now chosen via the risk matrix popup,
+  // not typed, so Enter skips straight from Potensi Bahaya to Mitigasi.
   const ROW_FIELD_ORDER: (keyof JSARow)[] = [
-    'langkah', 'peralatan', 'potensiBahaya', 'tingkatRisiko', 'mitigasi', 'penanggungjawab',
+    'langkah', 'peralatan', 'potensiBahaya', 'mitigasi', 'penanggungjawab',
   ];
 
   // Refs to every text input in the JSA table, keyed by `${rowId}:${field}`,
@@ -223,6 +314,8 @@ export default function DetailJSAPage() {
     return Object.keys(newErrors).length === 0;
   };
 
+  const othersPPETexts = [...othersTags, ...(othersInput.trim() ? [othersInput.trim()] : [])];
+
   const buildJSAData = () => ({
     jsaNo: nomorSikaGabungan,
     kontraktor: jsa?.kontraktor ?? '',
@@ -236,6 +329,7 @@ export default function DetailJSAPage() {
     status: meta.status,
     sections,
     checkedPPE: ppe.flat().filter((item) => item.checked).map((item) => item.label),
+    othersPPETexts,
   });
 
   const handleSaveClose = () => {
@@ -565,16 +659,15 @@ export default function DetailJSAPage() {
                               />
                             </td>
                             <td className="px-1.5 py-2 text-center border-r border-gray-200">
-                              <input
-                                type="text"
-                                value={row.tingkatRisiko}
-                                onChange={(e) => updateRow(sec.key, row.id, 'tingkatRisiko', e.target.value)}
-                                onKeyDown={(e) => handleFieldKeyDown(sec.key, row.id, 'tingkatRisiko', e)}
-                                ref={(el) => { fieldRefs.current[fieldRefKey(row.id, 'tingkatRisiko')] = el; }}
-                                placeholder="Risiko"
+                              <button
+                                type="button"
+                                onClick={() => openRiskModal(sec.key, row.id)}
                                 style={{ background: risk.bg, color: risk.text, border: `1.5px solid ${risk.text}60`, fontWeight: 600, boxShadow: '0 1px 2px rgba(0,0,0,0.06)' }}
-                                className="w-full rounded-full text-xs py-1 px-2 text-center outline-none placeholder-gray-300 transition"
-                              />
+                                className="w-full rounded-full text-xs py-1.5 px-2 text-center transition hover:brightness-95 cursor-pointer truncate"
+                                title="Klik untuk pilih tingkat risiko"
+                              >
+                                {row.tingkatRisiko || 'Pilih risiko'}
+                              </button>
                             </td>
                             <td className="px-2 py-2 border-r border-gray-200">
                               <input
@@ -640,32 +733,66 @@ export default function DetailJSAPage() {
               <tbody>
                 {ppe.map((row, ri) => (
                   <tr key={ri} style={{ background: ri % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
-                    {row.map((item, ci) => (
-                      <Fragment key={ci}>
-                        <td className={`border border-gray-200 px-3 py-2.5 text-gray-700 text-xs font-medium ${item.label === 'Others :' ? 'underline' : ''}`}>
-                          {item.label}
-                        </td>
-                        <td
-                          className="border border-gray-200 w-10 text-center select-none transition"
-                          style={{ background: item.checked ? '#eff6ff' : undefined }}
-                        >
-                          <label className="flex items-center justify-center cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={item.checked}
-                              onChange={() => togglePPE(ri, ci)}
-                              className="w-3.5 h-3.5 shrink-0 accent-blue-600 cursor-pointer"
-                            />
-                          </label>
-                        </td>
-                      </Fragment>
-                    ))}
+                    {row.map((item, ci) => {
+                      const isOthers = item.label === OTHERS_LABEL;
+                      return (
+                        <Fragment key={ci}>
+                          <td className="border border-gray-200 px-3 py-2.5 text-gray-700 text-xs font-medium">
+                            {isOthers ? (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="underline shrink-0">{item.label}</span>
+                                {othersTags.map((tag, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-full pl-2 pr-1 py-0.5 text-[11px] font-normal"
+                                  >
+                                    {tag}
+                                    <button
+                                      type="button"
+                                      onClick={() => removeOthersTag(idx)}
+                                      className="w-3.5 h-3.5 inline-flex items-center justify-center rounded-full hover:bg-blue-100 text-blue-500 leading-none"
+                                      title="Hapus"
+                                    >
+                                      ×
+                                    </button>
+                                  </span>
+                                ))}
+                                <input
+                                  type="text"
+                                  value={othersInput}
+                                  onChange={(e) => setOthersInput(e.target.value)}
+                                  onKeyDown={handleOthersKeyDown}
+                                  onBlur={commitOthersInput}
+                                  placeholder={othersTags.length ? 'Tambah...' : 'Sebutkan...'}
+                                  className="flex-1 min-w-[70px] border-b border-gray-300 focus:border-blue-500 outline-none bg-transparent text-xs font-normal text-gray-700 placeholder-gray-300 py-0.5"
+                                />
+                              </div>
+                            ) : (
+                              item.label
+                            )}
+                          </td>
+                          <td
+                            className="border border-gray-200 w-10 text-center select-none transition"
+                            style={{ background: item.checked ? '#eff6ff' : undefined }}
+                          >
+                            <label className="flex items-center justify-center cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={item.checked}
+                                onChange={() => togglePPE(ri, ci)}
+                                className="w-3.5 h-3.5 shrink-0 accent-blue-600 cursor-pointer"
+                              />
+                            </label>
+                          </td>
+                        </Fragment>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
             </table>
             <p className="text-xs text-gray-400 mt-2 italic">
-              *Berikan tanda ✓ didalam kotak untuk peralatan pelindung dan sistem yang digunakan
+              *Berikan tanda ✓ didalam kotak untuk peralatan pelindung dan sistem yang digunakan. Untuk &quot;Others :&quot;, ketik nama peralatan/sistem lain lalu tekan Enter — bisa lebih dari satu, kotaknya otomatis tercentang saat diisi.
             </p>
           </div>
 
@@ -692,6 +819,106 @@ export default function DetailJSAPage() {
 
         </div>
       </div>
+
+      {riskModal && (() => {
+        const sec = sections.find((s) => s.key === riskModal.sectionKey);
+        const activeRow = sec?.rows.find((r) => r.id === riskModal.rowId);
+        const currentScoreMatch = activeRow?.tingkatRisiko.match(/\((\d+)\)/);
+        const currentScore = currentScoreMatch ? parseInt(currentScoreMatch[1], 10) : null;
+
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+            onClick={closeRiskModal}
+          >
+            <div
+              className="bg-white rounded-xl shadow-2xl max-w-2xl w-full overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100"
+                style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}>
+                <div>
+                  <span className="text-white font-bold text-sm">Pilih Tingkat Risiko</span>
+                  <p className="text-blue-200 text-xs mt-0.5">Klik salah satu sel sesuai kemungkinan &amp; keparahan kejadian</p>
+                </div>
+                <button
+                  onClick={closeRiskModal}
+                  className="text-white/80 hover:text-white text-lg leading-none w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 transition"
+                  title="Tutup"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="p-4 overflow-x-auto">
+                <table className="w-full border-collapse text-xs" style={{ minWidth: 560 }}>
+                  <thead>
+                    <tr>
+                      <th className="border border-gray-300 bg-gray-400" style={{ width: 90 }} />
+                      <th colSpan={5} className="border border-gray-300 py-2 text-center font-bold italic" style={{ background: '#fbd7b7' }}>
+                        PROBABILITY <span className="not-italic font-normal">(KEMUNGKINAN KEJADIAN)</span>
+                      </th>
+                    </tr>
+                    <tr>
+                      <th className="border border-gray-300 py-2 font-bold" style={{ background: '#bfdbfe' }}>LEVEL</th>
+                      {RISK_COLS.map((c) => (
+                        <th key={c.prob} className="border border-gray-300 px-2 py-2 font-normal" style={{ background: '#fbd7b7' }}>
+                          {c.label}
+                        </th>
+                      ))}
+                    </tr>
+                    <tr>
+                      <th className="border border-gray-300" style={{ background: '#bfdbfe' }} />
+                      {RISK_COLS.map((c) => (
+                        <th key={c.prob} className="border border-gray-300 py-1 font-semibold" style={{ background: '#fbd7b7' }}>
+                          {c.prob}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {RISK_ROWS.map((r) => (
+                      <tr key={r.level}>
+                        <td className="border border-gray-300 px-2 py-3 text-center font-semibold" style={{ background: '#fbd7b7' }}>
+                          {r.level}<br />
+                          <span className="font-normal italic">{r.label}</span>
+                        </td>
+                        {RISK_COLS.map((c) => {
+                          const score = r.level * c.prob;
+                          const { bg, text } = getMatrixCellColor(score);
+                          const isSelected = currentScore === score;
+                          return (
+                            <td
+                              key={c.prob}
+                              onClick={() => selectRiskScore(score)}
+                              style={{
+                                background: bg,
+                                color: text,
+                                boxShadow: isSelected ? 'inset 0 0 0 3px #1e40af' : undefined,
+                              }}
+                              className="border border-gray-300 text-center font-bold py-3 cursor-pointer transition hover:opacity-80 select-none"
+                              title={`Skor ${score} — ${getRiskCategory(score)}`}
+                            >
+                              {score}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex items-center gap-4 px-5 pb-4 text-[11px] text-gray-500">
+                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#16a34a' }} /> Rendah</span>
+                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#fde047' }} /> Sedang</span>
+                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#fb923c' }} /> Tinggi</span>
+                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#ef4444' }} /> Tinggi (ekstrim)</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

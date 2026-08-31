@@ -47,6 +47,11 @@ interface JSAData {
   status: 'baru' | 'revisi';
   sections: JSASection[];
   checkedPPE: string[];
+  // Free-text values for the "Others :" item in the PPE checklist, so the
+  // user can type one or more extra equipment/systems instead of just
+  // ticking the box. Empty/blank entries are not meaningful and should be
+  // filtered out before saving.
+  othersPPETexts: string[];
 }
 
 interface AktivitasData {
@@ -166,10 +171,10 @@ type ApprovalStatus = 'draft' | 'request' | 'waiting' | 'approved' | 'rejected';
 
 interface ApprovalLogEntry {
   id: string;
-  dokumen: 'sika' | 'jsa' | 'perubahan' | 'revalidasi';
+  dokumen: 'sika' | 'jsa' | 'perubahan' | 'revalidasi' | 'gas_monitoring';
   aksi: 'approve' | 'reject' | 'ajukan_ulang';
   oleh: string;
-  peran: 'pemberi' | 'pja' | 'pemohon';
+  peran: 'pemberi' | 'pemohon';
   alasan?: string;
   submissionId?: string;
   timestamp: string;
@@ -185,11 +190,6 @@ interface SubmissionRecord {
   jsaStatusPemberi: ApprovalStatus;
   alasanTolakSikaPemberi: string | null;
   alasanTolakJsaPemberi: string | null;
-
-  sikaStatusPJA: ApprovalStatus;
-  jsaStatusPJA: ApprovalStatus;
-  alasanTolakSikaPJA: string | null;
-  alasanTolakJsaPJA: string | null;
 
   riwayatRevalidasi: string[];
 
@@ -259,25 +259,15 @@ export type OverallStatus = 'aktif' | 'pending' | 'ditolak' | 'closed' | 'draft'
 export type PerubahanStatus = 'none' | 'menunggu' | 'disetujui' | 'revisi';
 
 // ============================================================
-// PERBAIKAN: SIKA baru "aktif" setelah Pemberi approve DAN PJA approve
-// Sebelumnya: Pemberi approve saja langsung "aktif"
-// Sekarang: Pemberi approve + PJA approve → "aktif"
+// SIKA aktif langsung setelah Pemberi Kerja menyetujui SIKA & JSA.
+// Role PJA (Penanggung Jawab Area) sudah dihapus dari alur approval.
 // ============================================================
 export const getOverallStatus = (
   sikaPemberi: ApprovalStatus,
-  jsaPemberi: ApprovalStatus,
-  sikaPJA: ApprovalStatus,
-  jsaPJA: ApprovalStatus
+  jsaPemberi: ApprovalStatus
 ): OverallStatus => {
-  if (sikaPemberi === 'rejected' || jsaPemberi === 'rejected' || sikaPJA === 'rejected' || jsaPJA === 'rejected') return 'ditolak';
-  
-  // SIKA baru aktif setelah Pemberi approve DAN PJA approve
-  if (sikaPemberi === 'approved' && jsaPemberi === 'approved' && sikaPJA === 'approved' && jsaPJA === 'approved') {
-    return 'aktif';
-  }
-  
-  if (sikaPJA === 'approved' && jsaPJA === 'approved') return 'closed';
-  if (sikaPemberi === 'approved' && jsaPemberi === 'approved') return 'pending';
+  if (sikaPemberi === 'rejected' || jsaPemberi === 'rejected') return 'ditolak';
+  if (sikaPemberi === 'approved' && jsaPemberi === 'approved') return 'aktif';
   if (sikaPemberi === 'request' || jsaPemberi === 'request') return 'pending';
   return 'draft';
 };
@@ -363,11 +353,6 @@ interface ProgramStore {
   alasanTolakSikaPemberi: string | null;
   alasanTolakJsaPemberi: string | null;
 
-  sikaStatusPJA: ApprovalStatus;
-  jsaStatusPJA: ApprovalStatus;
-  alasanTolakSikaPJA: string | null;
-  alasanTolakJsaPJA: string | null;
-
   submissions: SubmissionRecord[];
   activeSubmissionId: string | null;
 
@@ -410,11 +395,6 @@ interface ProgramStore {
   approveJsaPemberi: (oleh: string, id?: string) => void;
   rejectJsaPemberi: (oleh: string, alasan: string, id?: string) => void;
 
-  approveSikaPJA: (oleh: string, id?: string) => void;
-  rejectSikaPJA: (oleh: string, alasan: string, id?: string) => void;
-  approveJsaPJA: (oleh: string, id?: string) => void;
-  rejectJsaPJA: (oleh: string, alasan: string, id?: string) => void;
-
   ajukanPerubahanRevalidasi: (oleh: string, catatan?: string, id?: string) => void;
   approvePerubahanRevalidasi: (oleh: string, id?: string) => void;
   mintaRevisiPerubahan: (oleh: string, catatan: string, id?: string) => void;
@@ -448,7 +428,7 @@ export const useProgramStore = create<ProgramStore>()(
       const applyApproval = (
         id: string | undefined,
         dokumen: 'sika' | 'jsa',
-        peran: 'pemberi' | 'pja',
+        peran: 'pemberi',
         aksi: 'approve' | 'reject',
         oleh: string,
         alasan: string | undefined,
@@ -490,11 +470,6 @@ export const useProgramStore = create<ProgramStore>()(
         jsaStatusPemberi: 'draft',
         alasanTolakSikaPemberi: null,
         alasanTolakJsaPemberi: null,
-
-        sikaStatusPJA: 'draft',
-        jsaStatusPJA: 'draft',
-        alasanTolakSikaPJA: null,
-        alasanTolakJsaPJA: null,
 
         submissions: [],
         activeSubmissionId: null,
@@ -667,10 +642,6 @@ export const useProgramStore = create<ProgramStore>()(
               jsaStatusPemberi: 'request',
               alasanTolakSikaPemberi: null,
               alasanTolakJsaPemberi: null,
-              sikaStatusPJA: 'draft',
-              jsaStatusPJA: 'draft',
-              alasanTolakSikaPJA: null,
-              alasanTolakJsaPJA: null,
               riwayatRevalidasi: [],
               revalidasiSuspendRequest: null,
               perubahanStatus: 'none',
@@ -733,56 +704,28 @@ export const useProgramStore = create<ProgramStore>()(
           applyApproval(id, 'sika', 'pemberi', 'approve', oleh, undefined, (record) =>
             record.sikaStatusPemberi === 'approved'
               ? null
-              : { sikaStatusPemberi: 'approved', alasanTolakSikaPemberi: null, sikaStatusPJA: 'waiting' }
+              : { sikaStatusPemberi: 'approved', alasanTolakSikaPemberi: null }
           ),
 
         rejectSikaPemberi: (oleh, alasan, id) =>
           applyApproval(id, 'sika', 'pemberi', 'reject', oleh, alasan, (record) =>
             record.sikaStatusPemberi === 'approved'
               ? null
-              : { sikaStatusPemberi: 'rejected', alasanTolakSikaPemberi: alasan, sikaStatusPJA: 'draft' }
+              : { sikaStatusPemberi: 'rejected', alasanTolakSikaPemberi: alasan }
           ),
 
         approveJsaPemberi: (oleh, id) =>
           applyApproval(id, 'jsa', 'pemberi', 'approve', oleh, undefined, (record) =>
             record.sikaStatusPemberi !== 'approved' || record.jsaStatusPemberi === 'approved'
               ? null
-              : { jsaStatusPemberi: 'approved', alasanTolakJsaPemberi: null, jsaStatusPJA: 'waiting' }
+              : { jsaStatusPemberi: 'approved', alasanTolakJsaPemberi: null }
           ),
 
         rejectJsaPemberi: (oleh, alasan, id) =>
           applyApproval(id, 'jsa', 'pemberi', 'reject', oleh, alasan, (record) =>
             record.jsaStatusPemberi === 'approved'
               ? null
-              : { jsaStatusPemberi: 'rejected', alasanTolakJsaPemberi: alasan, jsaStatusPJA: 'draft' }
-          ),
-
-        approveSikaPJA: (oleh, id) =>
-          applyApproval(id, 'sika', 'pja', 'approve', oleh, undefined, (record) =>
-            record.sikaStatusPJA === 'approved' || record.sikaStatusPemberi !== 'approved'
-              ? null
-              : { sikaStatusPJA: 'approved', alasanTolakSikaPJA: null }
-          ),
-
-        rejectSikaPJA: (oleh, alasan, id) =>
-          applyApproval(id, 'sika', 'pja', 'reject', oleh, alasan, (record) =>
-            record.sikaStatusPJA === 'approved'
-              ? null
-              : { sikaStatusPJA: 'rejected', alasanTolakSikaPJA: alasan }
-          ),
-
-        approveJsaPJA: (oleh, id) =>
-          applyApproval(id, 'jsa', 'pja', 'approve', oleh, undefined, (record) =>
-            record.jsaStatusPJA === 'approved' || record.jsaStatusPemberi !== 'approved'
-              ? null
-              : { jsaStatusPJA: 'approved', alasanTolakJsaPJA: null }
-          ),
-
-        rejectJsaPJA: (oleh, alasan, id) =>
-          applyApproval(id, 'jsa', 'pja', 'reject', oleh, alasan, (record) =>
-            record.jsaStatusPJA === 'approved'
-              ? null
-              : { jsaStatusPJA: 'rejected', alasanTolakJsaPJA: alasan }
+              : { jsaStatusPemberi: 'rejected', alasanTolakJsaPemberi: alasan }
           ),
 
         ajukanPerubahanRevalidasi: (oleh, catatan, id) => {
@@ -927,10 +870,6 @@ export const useProgramStore = create<ProgramStore>()(
             jsaStatusPemberi: 'draft',
             alasanTolakSikaPemberi: null,
             alasanTolakJsaPemberi: null,
-            sikaStatusPJA: 'draft',
-            jsaStatusPJA: 'draft',
-            alasanTolakSikaPJA: null,
-            alasanTolakJsaPJA: null,
           }),
 
         openSubmission: (id) => {
@@ -946,10 +885,6 @@ export const useProgramStore = create<ProgramStore>()(
             jsaStatusPemberi: record.jsaStatusPemberi,
             alasanTolakSikaPemberi: record.alasanTolakSikaPemberi,
             alasanTolakJsaPemberi: record.alasanTolakJsaPemberi,
-            sikaStatusPJA: record.sikaStatusPJA,
-            jsaStatusPJA: record.jsaStatusPJA,
-            alasanTolakSikaPJA: record.alasanTolakSikaPJA,
-            alasanTolakJsaPJA: record.alasanTolakJsaPJA,
           });
         },
 
@@ -985,10 +920,6 @@ export const useProgramStore = create<ProgramStore>()(
             jsaStatusPemberi: 'draft',
             alasanTolakSikaPemberi: null,
             alasanTolakJsaPemberi: null,
-            sikaStatusPJA: 'draft',
-            jsaStatusPJA: 'draft',
-            alasanTolakSikaPJA: null,
-            alasanTolakJsaPJA: null,
             submissions: [],
             activeSubmissionId: null,
             approvalHistory: [],

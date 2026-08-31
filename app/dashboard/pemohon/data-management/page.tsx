@@ -7,14 +7,14 @@ import {
   CheckCircle, XCircle, Clock, AlertCircle, ChevronRight, Filter,
   Calendar, CalendarDays, ChevronDown, PauseCircle,
   TrendingUp, TrendingDown, Activity, ClipboardCheck,
-  Loader2, RefreshCcw, Download,
+  Loader2, RefreshCcw, Download, Wind, Plus, Trash2,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import {
   useProgramStore, getNomorSika, getOverallStatus,
   getRevalidasiOverride, MAX_HARI_REVALIDASI, toLocalDateKey,
 } from '@/store/programStore';
-import type { ApprovalStatus, OverallStatus } from '@/store/programStore';
+import type { ApprovalStatus, OverallStatus, GasMonitoringData, GasMonitoringRow } from '@/store/programStore';
 import { useAuthStore } from '@/store/authStore';
 import {
   ResponsiveContainer, Tooltip, Legend,
@@ -37,8 +37,6 @@ interface SIKARow {
   sertifikatList: string[];
   sikaStatusPemberi: ApprovalStatus;
   jsaStatusPemberi: ApprovalStatus;
-  sikaStatusPJA: ApprovalStatus;
-  jsaStatusPJA: ApprovalStatus;
   alasanTolakSika?: string | null;
   alasanTolakJsa?: string | null;
   sifatPekerjaan: string;
@@ -100,28 +98,6 @@ function StatusBadge({ status }: { status: DisplayStatus }) {
     </span>
   );
 }
-
-function StatusPJABadge({ status }: { status: ApprovalStatus }) {
-  if (status === 'approved') {
-    return (
-      <span
-        className="inline-flex items-center h-5 leading-none text-[10px] font-medium px-2 rounded-full whitespace-nowrap text-white shadow-sm"
-        style={{ background: '#00954E' }}
-      >
-        Disetujui
-      </span>
-    );
-  }
-  return (
-    <span
-      className="inline-flex items-center h-5 leading-none text-[10px] font-medium px-2 rounded-full whitespace-nowrap text-white shadow-sm"
-      style={{ background: '#F2A900' }}
-    >
-      Menunggu
-    </span>
-  );
-}
-
 
 const renderActiveSlice = (props: any) => {
   const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props;
@@ -354,18 +330,18 @@ function RevalidasiCell({
         </span>
         {!isAutoClosed && !isSuspended && (
           sudahValidasiHariIni ? (
-            <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold" style={{ color: '#00954E' }}>
-              <CheckCircle size={9} strokeWidth={3} /> Tervalidasi
+            <span className="inline-flex items-center gap-0.5 text-[8px] font-semibold" style={{ color: '#00954E' }}>
+              <CheckCircle size={8} strokeWidth={3} /> Tervalidasi
             </span>
           ) : (
-            <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold" style={{ color: '#E31E24' }}>
-              <XCircle size={9} strokeWidth={3} /> Belum Validasi
+            <span className="inline-flex items-center gap-0.5 text-[8px] font-semibold" style={{ color: '#E31E24' }}>
+              <XCircle size={8} strokeWidth={3} /> Belum Validasi
             </span>
           )
         )}
         {isSuspended && (
-          <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold" style={{ color: '#EA580C' }}>
-            <PauseCircle size={9} strokeWidth={3} /> Suspend
+          <span className="inline-flex items-center gap-0.5 text-[8px] font-semibold" style={{ color: '#EA580C' }}>
+            <PauseCircle size={8} strokeWidth={3} /> Suspend
           </span>
         )}
       </div>
@@ -454,6 +430,44 @@ function RevalidasiCell({
           Validasi berikutnya dibuka besok.
         </p>
       )}
+    </div>
+  );
+}
+
+function GasMonitoringCell({
+  finalStatus,
+  sudahHariIni,
+  onIsi,
+}: {
+  finalStatus: OverallStatus;
+  sudahHariIni: boolean;
+  onIsi: () => void;
+}) {
+  if (finalStatus !== 'aktif') {
+    return <span className="text-[10px] text-gray-300 italic">Belum berlaku</span>;
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5 w-32">
+      {sudahHariIni ? (
+        <span className="inline-flex items-center gap-0.5 text-[8px] font-semibold" style={{ color: '#1e40af' }}>
+          <CheckCircle size={8} strokeWidth={3} /> Terisi hari ini
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-0.5 text-[8px] font-semibold" style={{ color: '#EA580C' }}>
+          <XCircle size={8} strokeWidth={3} /> Belum diisi
+        </span>
+      )}
+      <button
+        onClick={onIsi}
+        className={`inline-flex items-center justify-center gap-1 text-[10px] font-semibold rounded-lg px-2.5 py-1.5 transition shadow-sm w-fit border ${
+          sudahHariIni
+            ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+            : 'bg-blue-600 border-blue-600 hover:bg-blue-700 text-white'
+        }`}
+      >
+        <Wind size={11} /> {sudahHariIni ? 'Lihat / Edit' : 'Isi Sekarang'}
+      </button>
     </div>
   );
 }
@@ -691,15 +705,244 @@ function RevalidasiModal({
   );
 }
 
+// ═══════════════════════════════════════════════════════════
+// Gas Monitoring Modal — samakan bahasa visual dengan RevalidasiModal
+// (header gradient, card putih rounded-2xl, footer aksi), isi berupa
+// tabel pemeriksaan kondisi gas harian. Hanya bisa diisi saat SIKA aktif.
+// ═══════════════════════════════════════════════════════════
+let gasRowIdCounter = 1;
+const makeEmptyGasRow = (): GasMonitoringRow => ({
+  id: gasRowIdCounter++,
+  time: '',
+  lel: '',
+  o2: '',
+  h2s: '',
+  co2: '',
+  co: '',
+  temp: '',
+  sign: '',
+  remark: '',
+});
+
+function GasMonitoringModal({
+  row,
+  existingData,
+  onClose,
+  onSubmit,
+}: {
+  row: SIKARow;
+  existingData?: GasMonitoringData;
+  onClose: () => void;
+  onSubmit: (data: GasMonitoringData) => void;
+}) {
+  const [diukurOleh, setDiukurOleh] = useState(existingData?.diukurOleh ?? '');
+  const [rows, setRows] = useState<GasMonitoringRow[]>(
+    existingData?.rows && existingData.rows.length > 0 ? existingData.rows : [makeEmptyGasRow()]
+  );
+
+  const todayLabel = new Date().toLocaleDateString('id-ID', {
+    weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
+  });
+
+  const handleRowChange = (index: number, field: keyof GasMonitoringRow, value: string) => {
+    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
+  };
+
+  const handleAddRow = () => setRows((prev) => [...prev, makeEmptyGasRow()]);
+  const handleRemoveRow = (index: number) =>
+    setRows((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
+
+  const isiTerisi = rows.some((r) =>
+    [r.time, r.lel, r.o2, r.h2s, r.co2, r.co, r.temp, r.sign].some((v) => v.trim() !== '')
+  );
+  const bisaSimpan = diukurOleh.trim() !== '' && isiTerisi;
+
+  const inputCls =
+    'w-full border border-gray-200 rounded-md px-1.5 py-1 text-[11px] text-gray-800 text-center focus:outline-none focus:ring-1 focus:ring-blue-300 focus:border-blue-300 transition';
+
+  const handleSubmit = () => {
+    if (!bisaSimpan) return;
+    onSubmit({
+      tanggal: toLocalDateKey(new Date()),
+      diukurOleh: diukurOleh.trim(),
+      rows,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden max-h-[92vh] flex flex-col">
+
+        <div
+          className="px-6 py-4 flex items-center justify-between shrink-0"
+          style={{ background: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)' }}
+        >
+          <div className="leading-tight">
+            <p className="text-white font-bold text-sm">Gas Monitoring</p>
+            <p className="text-[10px] text-white/70 font-medium">Pemeriksaan kondisi gas harian</p>
+          </div>
+          <Wind size={20} className="text-white/70" />
+        </div>
+
+        <div className="overflow-y-auto">
+          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/60">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-gray-800 truncate">{row.namaProgram}</p>
+                <p className="text-xs font-semibold text-blue-700 mt-0.5">{row.noSIKA}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
+                  <MapPin size={10} className="shrink-0" /> {row.lokasi}
+                </p>
+              </div>
+              <span className="shrink-0 text-[10px] font-medium text-gray-400 text-right">{todayLabel}</span>
+            </div>
+          </div>
+
+          <div className="px-6 py-4 space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide whitespace-nowrap">
+                Diukur oleh
+              </label>
+              <input
+                type="text"
+                value={diukurOleh}
+                onChange={(e) => setDiukurOleh(e.target.value)}
+                placeholder="Nama petugas..."
+                className="flex-1 min-w-40 border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-300 focus:border-blue-300 transition"
+              />
+            </div>
+
+            <div className="border border-gray-100 rounded-xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs border-collapse min-w-[720px]">
+                  <thead>
+                    <tr className="bg-blue-50">
+                      <th rowSpan={2} className="border border-blue-100 px-2 py-2 text-blue-700 font-semibold w-9">No</th>
+                      <th rowSpan={2} className="border border-blue-100 px-2 py-2 text-blue-700 font-semibold w-20">Waktu</th>
+                      <th colSpan={5} className="border border-blue-100 px-2 py-2 text-blue-700 font-semibold">Gas</th>
+                      <th rowSpan={2} className="border border-blue-100 px-2 py-2 text-blue-700 font-semibold w-16">Temp °C</th>
+                      <th rowSpan={2} className="border border-blue-100 px-2 py-2 text-blue-700 font-semibold w-20">Sign</th>
+                      <th rowSpan={2} className="border border-blue-100 px-2 py-2 text-blue-700 font-semibold min-w-[120px]">Remark</th>
+                      <th rowSpan={2} className="border border-blue-100 px-1 py-2 w-8"></th>
+                    </tr>
+                    <tr className="bg-blue-50">
+                      <th className="border border-blue-100 px-1 py-1.5 text-blue-600 font-medium w-16">LEL %</th>
+                      <th className="border border-blue-100 px-1 py-1.5 text-blue-600 font-medium w-16">O2 %</th>
+                      <th className="border border-blue-100 px-1 py-1.5 text-blue-600 font-medium w-20">H2S ppm</th>
+                      <th className="border border-blue-100 px-1 py-1.5 text-blue-600 font-medium w-20">CO2 ppm</th>
+                      <th className="border border-blue-100 px-1 py-1.5 text-blue-600 font-medium w-20">CO ppm</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r, index) => (
+                      <tr key={r.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                        <td className="border border-gray-100 px-2 py-1 text-center text-gray-400 font-mono">
+                          {String(index + 1).padStart(2, '0')}
+                        </td>
+                        <td className="border border-gray-100 px-1 py-1">
+                          <input type="time" value={r.time} onChange={(e) => handleRowChange(index, 'time', e.target.value)} className={inputCls} />
+                        </td>
+                        <td className="border border-gray-100 px-1 py-1">
+                          <input type="text" value={r.lel} onChange={(e) => handleRowChange(index, 'lel', e.target.value)} className={inputCls} placeholder="0" />
+                        </td>
+                        <td className="border border-gray-100 px-1 py-1">
+                          <input type="text" value={r.o2} onChange={(e) => handleRowChange(index, 'o2', e.target.value)} className={inputCls} placeholder="0" />
+                        </td>
+                        <td className="border border-gray-100 px-1 py-1">
+                          <input type="text" value={r.h2s} onChange={(e) => handleRowChange(index, 'h2s', e.target.value)} className={inputCls} placeholder="0" />
+                        </td>
+                        <td className="border border-gray-100 px-1 py-1">
+                          <input type="text" value={r.co2} onChange={(e) => handleRowChange(index, 'co2', e.target.value)} className={inputCls} placeholder="0" />
+                        </td>
+                        <td className="border border-gray-100 px-1 py-1">
+                          <input type="text" value={r.co} onChange={(e) => handleRowChange(index, 'co', e.target.value)} className={inputCls} placeholder="0" />
+                        </td>
+                        <td className="border border-gray-100 px-1 py-1">
+                          <input type="text" value={r.temp} onChange={(e) => handleRowChange(index, 'temp', e.target.value)} className={inputCls} placeholder="0" />
+                        </td>
+                        <td className="border border-gray-100 px-1 py-1">
+                          <input type="text" value={r.sign} onChange={(e) => handleRowChange(index, 'sign', e.target.value)} className={inputCls} placeholder="..." />
+                        </td>
+                        <td className="border border-gray-100 px-1 py-1">
+                          <input
+                            type="text"
+                            value={r.remark}
+                            onChange={(e) => handleRowChange(index, 'remark', e.target.value)}
+                            className="w-full border border-gray-200 rounded-md px-2 py-1 text-[11px] text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-300 focus:border-blue-300 transition"
+                            placeholder="Catatan..."
+                          />
+                        </td>
+                        <td className="border border-gray-100 px-1 py-1 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveRow(index)}
+                            disabled={rows.length === 1}
+                            className={`transition ${rows.length === 1 ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-red-500'}`}
+                            title="Hapus baris"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="px-3 py-2.5 border-t border-gray-100 bg-gray-50">
+                <button
+                  type="button"
+                  onClick={handleAddRow}
+                  className="flex items-center gap-1.5 text-xs text-blue-700 hover:text-blue-800 font-semibold transition"
+                >
+                  <Plus size={13} />
+                  Tambah Baris
+                </button>
+              </div>
+            </div>
+
+            <p className="text-[10px] text-gray-400 leading-relaxed">
+              Pemeriksaan kondisi gas dilakukan berkala selama pekerjaan berlangsung dan hanya dapat diisi
+              selama SIKA berstatus <span className="font-semibold text-gray-500">Aktif</span>.
+            </p>
+          </div>
+        </div>
+
+        <div className="px-6 py-3.5 border-t border-gray-100 flex items-center justify-end gap-2 bg-gray-50/60 shrink-0">
+          <button
+            onClick={onClose}
+            className="text-xs font-semibold text-gray-500 hover:text-gray-700 px-3.5 py-2 rounded-lg transition"
+          >
+            Batal
+          </button>
+          <button
+            disabled={!bisaSimpan}
+            onClick={handleSubmit}
+            className={`inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg transition ${
+              bisaSimpan
+                ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm'
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+            }`}
+          >
+            <CheckCircle size={13} strokeWidth={2.5} />
+            Simpan Gas Monitoring
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PemohonMonitoringPage() {
   const router = useRouter();
   const {
     submissions,
     sertifikatData,
+    gasMonitoringData,
     catatRevalidasi,
     ajukanRevalidasiSuspend,
     startNewDraft,
     openSubmission,
+    setGasMonitoringData,
   } = useProgramStore();
   const { user } = useAuthStore();
 
@@ -713,6 +956,7 @@ export default function PemohonMonitoringPage() {
   const [showFilter, setShowFilter] = useState(false);
   const [activePieIndex, setActivePieIndex] = useState<number | undefined>(undefined);
   const [revalidasiModalRowId, setRevalidasiModalRowId] = useState<string | null>(null);
+  const [gasModalRowId, setGasModalRowId] = useState<string | null>(null);
 
   const [timeFilter, setTimeFilter] = useState<TimeFilterType>('bulan');
   const [customRange, setCustomRange] = useState<{ start: string; end: string }>({
@@ -737,10 +981,8 @@ export default function PemohonMonitoringPage() {
         sertifikatList: sub.sika.sertifikat || [],
         sikaStatusPemberi: sub.sikaStatusPemberi,
         jsaStatusPemberi: sub.jsaStatusPemberi,
-        sikaStatusPJA: sub.sikaStatusPJA,
-        jsaStatusPJA: sub.jsaStatusPJA,
-        alasanTolakSika: sub.alasanTolakSikaPemberi || sub.alasanTolakSikaPJA,
-        alasanTolakJsa: sub.alasanTolakJsaPemberi || sub.alasanTolakJsaPJA,
+        alasanTolakSika: sub.alasanTolakSikaPemberi,
+        alasanTolakJsa: sub.alasanTolakJsaPemberi,
         sifatPekerjaan: sub.sika.sifatPekerjaan || '-',
         identifikasiBahaya: sub.sika.identifikasi || [],
         riwayatRevalidasi: sub.riwayatRevalidasi,
@@ -754,7 +996,7 @@ export default function PemohonMonitoringPage() {
   }, [submissions]);
 
   const getFinalStatus = (row: SIKARow): OverallStatus => {
-    const base = getOverallStatus(row.sikaStatusPemberi, row.jsaStatusPemberi, row.sikaStatusPJA, row.jsaStatusPJA);
+    const base = getOverallStatus(row.sikaStatusPemberi, row.jsaStatusPemberi);
     if (base !== 'aktif') return base;
     const override = getRevalidasiOverride(row.createdAt || row.tanggalKontrak, row.riwayatRevalidasi);
     return override ?? base;
@@ -921,15 +1163,26 @@ export default function PemohonMonitoringPage() {
     ? getRevalidasiOverride(revalidasiModalRow.createdAt || revalidasiModalRow.tanggalKontrak, revalidasiModalRow.riwayatRevalidasi) === 'suspend'
     : false;
 
+  const gasModalRow = gasModalRowId ? rows.find(r => r.id === gasModalRowId) : undefined;
+  const todayKey = toLocalDateKey(new Date());
+  const gasKeyFor = (rowId: string) => `${rowId}_${todayKey}`;
+  const gasModalExistingData = gasModalRowId ? gasMonitoringData?.[gasKeyFor(gasModalRowId)] : undefined;
+
   const handleSubmitRevalidasi = (_data: { catatan: string }) => {
     if (!revalidasiModalRowId) return;
     if (revalidasiModalIsSuspend) {
       ajukanRevalidasiSuspend(user?.name || 'Pemohon', revalidasiModalRowId);
     } else {
-      const todayKey = toLocalDateKey(new Date());
-      catatRevalidasi(revalidasiModalRowId, todayKey);
+      const key = toLocalDateKey(new Date());
+      catatRevalidasi(revalidasiModalRowId, key);
     }
     setRevalidasiModalRowId(null);
+  };
+
+  const handleSubmitGasMonitoring = (data: GasMonitoringData) => {
+    if (!gasModalRowId) return;
+    setGasMonitoringData(gasKeyFor(gasModalRowId), data);
+    setGasModalRowId(null);
   };
 
   const handleBuatPengajuanBaru = () => {
@@ -959,6 +1212,7 @@ export default function PemohonMonitoringPage() {
     const exportRows = filtered.map((row, i) => {
       const status = DISPLAY_STATUS_CONFIG[getDisplayStatus(row)].label;
       const sisaHari = hitungSisaHari(row.tanggalBerakhirSIKA);
+      const gasSudahHariIni = !!gasMonitoringData?.[gasKeyFor(row.id)];
       return {
         'No': i + 1,
         'Nama Program': row.namaProgram,
@@ -969,21 +1223,20 @@ export default function PemohonMonitoringPage() {
         'Tanggal Kontrak': row.tanggalKontrak,
         'Tanggal Berakhir SIKA': row.tanggalBerakhirSIKA,
         'Sisa Hari': sisaHari ?? '-',
-        'SIKA - PJA': row.sikaStatusPJA === 'approved' ? 'Disetujui' : 'Menunggu',
-        'JSA - PJA': row.jsaStatusPJA === 'approved' ? 'Disetujui' : 'Menunggu',
         'SIKA - Pemberi': APPROVAL_BADGE[row.sikaStatusPemberi].label,
         'JSA - Pemberi': APPROVAL_BADGE[row.jsaStatusPemberi].label,
         'Status Akhir': status,
         'Alasan Tolak': row.alasanTolakSika || row.alasanTolakJsa || '-',
         'Status Perubahan': row.perubahanStatus !== 'none' ? row.perubahanStatus : '-',
+        'Gas Monitoring Hari Ini': gasSudahHariIni ? 'Sudah' : 'Belum',
       };
     });
 
     const worksheet = XLSX.utils.json_to_sheet(exportRows);
     worksheet['!cols'] = [
       { wch: 5 }, { wch: 30 }, { wch: 16 }, { wch: 24 }, { wch: 22 },
-      { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 9 }, { wch: 12 },
-      { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 14 },
+      { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 9 },
+      { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 14 }, { wch: 16 },
     ];
 
     const workbook = XLSX.utils.book_new();
@@ -1451,7 +1704,7 @@ export default function PemohonMonitoringPage() {
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr style={{ background: '#f8fafc' }} className="border-b border-gray-200">
-                    {['No', 'Nama Program', 'Lokasi / Area', 'No SIKA', 'Sertifikat', 'Sifat', 'Premobilisasi', 'Mobilisasi', 'Pemberi (SIKA)', 'Pemberi (JSA)', 'Revalidasi', 'Status', 'Aksi'].map((h) => (
+                    {['No', 'Nama Program', 'Lokasi / Area', 'No SIKA', 'Sertifikat', 'Sifat', 'Pemberi (SIKA)', 'Pemberi (JSA)', 'Revalidasi', 'Gas Monitoring', 'Status', 'Aksi'].map((h) => (
                       <th key={h} className="text-left px-3 py-3 font-medium text-gray-600 text-xs tracking-wide whitespace-nowrap">
                         {h}
                       </th>
@@ -1460,8 +1713,9 @@ export default function PemohonMonitoringPage() {
                 </thead>
                 <tbody>
                   {filtered.map((row, i) => {
-                    const baseStatus = getOverallStatus(row.sikaStatusPemberi, row.jsaStatusPemberi, row.sikaStatusPJA, row.jsaStatusPJA);
+                    const baseStatus = getOverallStatus(row.sikaStatusPemberi, row.jsaStatusPemberi);
                     const displayStatus = getDisplayStatus(row);
+                    const finalStatus = getFinalStatus(row);
                     const hasTolak = row.alasanTolakSika || row.alasanTolakJsa;
                     const sisaHari = hitungSisaHari(row.tanggalBerakhirSIKA);
                     const sertifikatIsi = row.sertifikatList
@@ -1469,6 +1723,7 @@ export default function PemohonMonitoringPage() {
                         const kode = s.match(/\(([^)]+)\)/)?.[1];
                         return kode || s.substring(0, 4);
                       });
+                    const gasSudahHariIni = !!gasMonitoringData?.[gasKeyFor(row.id)];
 
                     return (
                       <tr key={row.id} className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors">
@@ -1521,15 +1776,6 @@ export default function PemohonMonitoringPage() {
                             </span>
                           ) : <span className="text-[10px] text-gray-300">-</span>}
                         </td>
-                        {/* ============================================================
-                            PREMOBILISASI & MOBILISASI — hanya 2 status
-                        ============================================================ */}
-                        <td className="px-3 py-3 align-top">
-                          <StatusPJABadge status={row.sikaStatusPJA} />
-                        </td>
-                        <td className="px-3 py-3 align-top">
-                          <StatusPJABadge status={row.jsaStatusPJA} />
-                        </td>
                         <td className="px-3 py-3 align-top"><ApprovalBadge status={row.sikaStatusPemberi} /></td>
                         <td className="px-3 py-3 align-top"><ApprovalBadge status={row.jsaStatusPemberi} /></td>
                         <td className="px-3 py-3 align-top">
@@ -1539,6 +1785,13 @@ export default function PemohonMonitoringPage() {
                             validatedDates={row.riwayatRevalidasi}
                             onAjukan={(rowId) => setRevalidasiModalRowId(rowId)}
                             onRevisiPerubahan={handleAjukanUlangPerubahan}
+                          />
+                        </td>
+                        <td className="px-3 py-3 align-top">
+                          <GasMonitoringCell
+                            finalStatus={finalStatus}
+                            sudahHariIni={gasSudahHariIni}
+                            onIsi={() => setGasModalRowId(row.id)}
                           />
                         </td>
                         <td className="px-3 py-3 align-top">
@@ -1607,6 +1860,15 @@ export default function PemohonMonitoringPage() {
           isSuspendRecovery={revalidasiModalIsSuspend}
           onClose={() => setRevalidasiModalRowId(null)}
           onSubmit={handleSubmitRevalidasi}
+        />
+      )}
+
+      {gasModalRow && (
+        <GasMonitoringModal
+          row={gasModalRow}
+          existingData={gasModalExistingData}
+          onClose={() => setGasModalRowId(null)}
+          onSubmit={handleSubmitGasMonitoring}
         />
       )}
     </div>
