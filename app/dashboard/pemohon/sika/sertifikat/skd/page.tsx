@@ -741,7 +741,6 @@ export default function DetailProgramPage() {
     program, jsa, sika,
     setJsaStatus, submitToPemberi,
     sikaStatusPemberi, jsaStatusPemberi,
-    sikaStatusPJA, jsaStatusPJA,
     activeSubmissionId, catatRevalidasi,
     submissions, ajukanPerubahanRevalidasi,
     sertifikatData,
@@ -766,7 +765,7 @@ export default function DetailProgramPage() {
   // Revalidasi (Data Management) — maka yang relevan bukan "Request Review"
   // (itu untuk pengajuan yang belum pernah disetujui), melainkan mengirim
   // ulang data yang sudah diperbarui sebagai konfirmasi revalidasi.
-  const overallStatus = getOverallStatus(sikaStatusPemberi, jsaStatusPemberi, sikaStatusPJA, jsaStatusPJA);
+  const overallStatus = getOverallStatus(sikaStatusPemberi, jsaStatusPemberi);
   const isRevalidasiUpdate = overallStatus === 'aktif' || overallStatus === 'closed';
 
   // Submission yang sedang aktif dibuka, buat cek apakah perubahan yang
